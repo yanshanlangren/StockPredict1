@@ -1,2 +1,2 @@
 ﻿trial,model_type,lstm_units,dropout_rate,learning_rate,batch_size,loss,mae,mape,profit_rate,win_rate,total_trades
-1,lstm,"[64, 32, 16]",0.3,0.001,32,0.006563730537891388,0.06141422688961029,397283.28125,0,0,0
+1,lstm,"[64, 32, 16]",0.3,0.001,32,0.005956142209470272,0.05904379487037659,423274.15625,0,0,0

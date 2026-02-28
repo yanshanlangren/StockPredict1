@@ -42,7 +42,7 @@ def retry_request(max_retries=3, delay=2):
                     return func(*args, **kwargs)
                 except (requests.exceptions.ConnectionError, 
                        requests.exceptions.Timeout,
-                       requests.exceptions.RemoteDisconnected) as e:
+                       requests.exceptions.RequestException) as e:
                     if attempt < max_retries - 1:
                         logger.warning(f"请求失败，第 {attempt + 1}/{max_retries} 次重试... 错误: {e}")
                         time.sleep(delay * (attempt + 1))
@@ -125,8 +125,9 @@ class EastMoneyCrawler:
                 return pd.DataFrame()
 
         except Exception as e:
-            logger.error(f"获取股票列表失败: {e}")
-            return pd.DataFrame()
+            # 只记录警告，让装饰器处理重试
+            logger.warning(f"获取股票列表时出错: {e}")
+            raise  # 重新抛出异常，触发重试机制
 
     @retry_request(max_retries=3, delay=2)
     def get_stock_kline(self, stock_code: str, klt: int = 101, start_date: str = None, end_date: str = None) -> pd.DataFrame:
@@ -200,8 +201,8 @@ class EastMoneyCrawler:
                 return pd.DataFrame()
 
         except Exception as e:
-            logger.error(f"获取股票 {stock_code} K线数据失败: {e}")
-            return pd.DataFrame()
+            logger.warning(f"获取股票 {stock_code} K线数据时出错: {e}")
+            raise  # 重新抛出异常，触发重试机制
 
     def batch_download_stocks(self, stock_list: List[str], max_stocks: int = 50) -> Dict[str, pd.DataFrame]:
         """

@@ -73,9 +73,40 @@ pip install -r requirements.txt
 ```
 
 ## 使用方法
+
+### 快速开始（推荐）
+
 ```bash
-python main.py
+# 方式1: 使用模拟数据快速测试（无需网络）
+python test_system.py
+
+# 方式2: 使用交互式启动工具
+python start.py
+
+# 方式3: 完整流程（需要网络）
+python main.py --stocks 20
 ```
+
+### 当前状态说明
+
+**⚠️ 东方财富API暂时不可用**
+- ✅ 系统功能完全正常
+- ✅ 已生成20只股票的模拟数据
+- ✅ 可以使用模拟数据完成所有功能
+- ⏸️ 下载真实数据功能暂时不可用
+
+**推荐操作**:
+```bash
+# 使用模拟数据（推荐）
+python test_system.py
+
+# 或使用生成的数据训练
+python main.py --train-only
+```
+
+详见 [SOLUTION_FINAL.md](SOLUTION_FINAL.md)
+
+### 完整流程（网络恢复后）
 
 ## 配置说明
 可以在 `config.py` 中修改以下参数：

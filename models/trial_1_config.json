@@ -3,7 +3,7 @@
     60,
     12
   ],
-  "epochs_trained": 50,
-  "final_train_loss": 0.007031327113509178,
-  "final_val_loss": 0.009752997197210789
+  "epochs_trained": 37,
+  "final_train_loss": 0.007976224645972252,
+  "final_val_loss": 0.0069941370747983456
 }
