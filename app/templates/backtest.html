@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+    <h2>💰 回测系统</h2>
+
+    <div class="form-group">
+        <label for="stock-code">股票代码：</label>
+        <select id="stock-code">
+            <option value="">选择股票...</option>
+            <option value="600000">600000 - 浦发银行</option>
+            <option value="600004">600004 - 白云机场</option>
+            <option value="600006">600006 - 东风汽车</option>
+            <option value="600007">600007 - 中国国贸</option>
+            <option value="600008">600008 - 首创股份</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="days">回测天数：</label>
+        <input type="number" id="days" value="100" min="50" max="300">
+    </div>
+
+    <div class="form-group">
+        <label for="capital">初始资金：</label>
+        <input type="number" id="capital" value="100000" min="10000" step="10000">
+    </div>
+
+    <button class="btn btn-success" onclick="runBacktest()" id="backtest-btn">运行回测</button>
+</div>
+
+<div id="backtest-result"></div>
+
+<div id="backtest-chart" class="card" style="display: none;">
+    <h2>📈 收益曲线</h2>
+    <div class="chart-container">
+        <canvas id="backtestChart"></canvas>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 运行回测
+async function runBacktest() {
+    const stockCode = document.getElementById('stock-code').value;
+    const days = document.getElementById('days').value;
+    const capital = document.getElementById('capital').value;
+    const btn = document.getElementById('backtest-btn');
+
+    if (!stockCode) {
+        alert('请选择股票代码');
+        return;
+    }
+
+    // 显示加载状态
+    btn.disabled = true;
+    btn.textContent = '回测中...';
+    showLoading('backtest-result');
+    document.getElementById('backtest-chart').style.display = 'none';
+
+    try {
+        // 调用回测API
+        const response = await apiRequest(`/api/backtest/${stockCode}`, {
+            method: 'POST',
+            body: JSON.stringify({
+                days: parseInt(days),
+                initial_capital: parseInt(capital)
+            })
+        });
+
+        if (response.success) {
+            const data = response.data;
+
+            // 显示结果
+            const resultHtml = `
+                <div class="card">
+                    <h2>📊 回测结果</h2>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="label">初始资金</div>
+                            <div class="value" style="font-size: 22px;">¥${data.initial_capital.toLocaleString()}</div>
+                        </div>
+                        <div class="stat-card ${data.final_capital >= data.initial_capital ? 'positive' : 'negative'}">
+                            <div class="label">最终资金</div>
+                            <div class="value" style="font-size: 22px;">¥${data.final_capital.toLocaleString()}</div>
+                        </div>
+                        <div class="stat-card ${data.total_return >= 0 ? 'positive' : 'negative'}">
+                            <div class="label">总收益率</div>
+                            <div class="value">${formatPercent(data.total_return)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="label">胜率</div>
+                            <div class="value">${formatPercent(data.win_rate)}</div>
+                        </div>
+                        <div class="stat-card ${data.max_drawdown >= 0 ? 'positive' : 'negative'}">
+                            <div class="label">最大回撤</div>
+                            <div class="value">${formatPercent(data.max_drawdown)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="label">交易次数</div>
+                            <div class="value">${data.total_trades}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>📋 交易记录</h2>
+                    <div style="max-height: 300px; overflow-y: auto;">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>日期</th>
+                                    <th>操作</th>
+                                    <th>价格</th>
+                                    <th>数量</th>
+                                    <th>金额</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.trades.map(trade => `
+                                    <tr>
+                                        <td>${trade.date}</td>
+                                        <td style="color: ${trade.action === 'buy' ? '#28a745' : '#dc3545'};">
+                                            ${trade.action === 'buy' ? '买入' : '卖出'}
+                                        </td>
+                                        <td>${formatNumber(trade.price)}</td>
+                                        <td>${trade.shares}</td>
+                                        <td>¥${formatNumber(trade.amount, 0)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('backtest-result').innerHTML = resultHtml;
+
+            // 显示图表
+            document.getElementById('backtest-chart').style.display = 'block';
+            createBacktestChart('backtestChart', data);
+
+        } else {
+            showError('backtest-result', response.message);
+        }
+
+    } catch (error) {
+        showError('backtest-result', error.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '运行回测';
+    }
+}
+</script>
+{% endblock %}

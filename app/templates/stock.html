@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+    <h2>📊 股票查询</h2>
+
+    <div class="form-group">
+        <label for="stock-code">股票代码：</label>
+        <select id="stock-code">
+            <option value="">选择股票...</option>
+            <option value="600000">600000 - 浦发银行</option>
+            <option value="600004">600004 - 白云机场</option>
+            <option value="600006">600006 - 东风汽车</option>
+            <option value="600007">600007 - 中国国贸</option>
+            <option value="600008">600008 - 首创股份</option>
+            <option value="600009">600009 - 上海机场</option>
+            <option value="600010">600010 - 包钢股份</option>
+            <option value="600011">600011 - 华能国际</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="days">获取天数：</label>
+        <input type="number" id="days" value="100" min="30" max="500">
+    </div>
+
+    <button class="btn btn-primary" onclick="loadStockData()">查询</button>
+</div>
+
+<div id="stock-info"></div>
+
+<div id="stock-chart" class="card" style="display: none;">
+    <h2>📈 股价走势</h2>
+    <div class="chart-container">
+        <canvas id="klineChart"></canvas>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 加载股票数据
+async function loadStockData() {
+    const stockCode = document.getElementById('stock-code').value;
+    const days = document.getElementById('days').value;
+
+    if (!stockCode) {
+        alert('请选择股票代码');
+        return;
+    }
+
+    const infoDiv = document.getElementById('stock-info');
+    const chartDiv = document.getElementById('stock-chart');
+
+    // 显示加载状态
+    showLoading('stock-info');
+    chartDiv.style.display = 'none';
+
+    try {
+        // 获取股票信息
+        const response = await apiRequest(`/api/stock/${stockCode}?days=${days}`);
+
+        if (response.success) {
+            const data = response.data;
+
+            // 显示统计信息
+            const statsHtml = `
+                <div class="card">
+                    <h2>📋 ${data.code} - 基本信息</h2>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="label">当前价格</div>
+                            <div class="value">${data.stats.current}</div>
+                        </div>
+                        <div class="stat-card ${data.stats.change >= 0 ? 'positive' : 'negative'}">
+                            <div class="label">涨跌幅</div>
+                            <div class="value">${formatPercent(data.stats.change)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="label">最高价</div>
+                            <div class="value">${data.stats.high}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="label">最低价</div>
+                            <div class="value">${data.stats.low}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="label">总成交量</div>
+                            <div class="value" style="font-size: 20px;">${(data.stats.volume / 100000000).toFixed(2)}亿</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="label">数据天数</div>
+                            <div class="value">${data.stats.days}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            infoDiv.innerHTML = statsHtml;
+
+            // 显示图表
+            chartDiv.style.display = 'block';
+            createKLineChart('klineChart', data.kline);
+
+            // 更新URL参数
+            const url = new URL(window.location);
+            url.searchParams.set('code', stockCode);
+            window.history.pushState({}, '', url);
+
+        } else {
+            showError('stock-info', response.message);
+        }
+
+    } catch (error) {
+        showError('stock-info', error.message);
+    }
+}
+
+// 页面加载时检查URL参数
+document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+
+    if (code) {
+        document.getElementById('stock-code').value = code;
+        loadStockData();
+    }
+});
+</script>
+{% endblock %}

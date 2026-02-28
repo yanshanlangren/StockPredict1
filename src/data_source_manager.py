@@ -6,7 +6,6 @@ import logging
 from typing import Optional, List
 from enum import Enum
 
-from crawler import EastMoneyCrawler
 from tencent_crawler import TencentFinanceCrawler
 import sys
 import os
@@ -21,7 +20,6 @@ logger = logging.getLogger(__name__)
 class DataSource(Enum):
     """数据源枚举"""
     TENCENT = "tencent"  # 腾讯财经（推荐）
-    EASTMONEY = "eastmoney"  # 东方财富（备用）
     MOCK = "mock"  # 模拟数据（兜底）
 
 
@@ -37,7 +35,6 @@ class DataSourceManager:
         """
         self.preferred_source = preferred_source
         self.tencent_crawler = None
-        self.eastmoney_crawler = None
         self.mock_data_path = "data/raw/mock_stock_data.csv"
 
         # 延迟初始化爬虫
@@ -51,11 +48,8 @@ class DataSourceManager:
         except Exception as e:
             logger.warning(f"腾讯财经爬虫初始化失败: {e}")
 
-        try:
-            self.eastmoney_crawler = EastMoneyCrawler()
-            logger.info("东方财富爬虫初始化成功")
         except Exception as e:
-            logger.warning(f"东方财富爬虫初始化失败: {e}")
+            logger.warning(f"腾讯财经爬虫初始化失败: {e}")
 
     def get_stock_kline(self, stock_code: str, days: int = 300, source: Optional[DataSource] = None) -> pd.DataFrame:
         """
@@ -87,12 +81,6 @@ class DataSourceManager:
                     df = self.tencent_crawler.get_stock_kline(tencent_code, days)
                     if not df.empty:
                         logger.info(f"✓ 使用腾讯财经成功获取数据")
-                        return df
-
-                elif ds == DataSource.EASTMONEY and self.eastmoney_crawler:
-                    df = self.eastmoney_crawler.get_stock_kline(stock_code, days)
-                    if not df.empty:
-                        logger.info(f"✓ 使用东方财富成功获取数据")
                         return df
 
                 elif ds == DataSource.MOCK:
@@ -135,11 +123,12 @@ class DataSourceManager:
         Returns:
             按优先级排序的数据源列表
         """
-        # 默认优先级：腾讯财经 > 东方财富 > 模拟数据
-        all_sources = [DataSource.TENCENT, DataSource.EASTMONEY, DataSource.MOCK]
+        # 默认优先级：腾讯财经 > 模拟数据
+        all_sources = [DataSource.TENCENT, DataSource.MOCK]
 
         # 将首选源移到最前面
-        all_sources.remove(preferred)
+        if preferred in all_sources:
+            all_sources.remove(preferred)
         all_sources.insert(0, preferred)
 
         return all_sources
@@ -221,14 +210,6 @@ class DataSourceManager:
                     df = self.tencent_crawler.get_stock_list(limit=limit)
                     if not df.empty:
                         logger.info(f"✓ 使用腾讯财经成功获取股票列表")
-                        return df
-
-                elif ds == DataSource.EASTMONEY and self.eastmoney_crawler:
-                    df = self.eastmoney_crawler.get_stock_list()
-                    if not df.empty:
-                        if limit:
-                            df = df.head(limit)
-                        logger.info(f"✓ 使用东方财富成功获取股票列表")
                         return df
 
                 elif ds == DataSource.MOCK:

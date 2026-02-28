@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>股票交易AI系统</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- 顶部导航 -->
+        <header class="header">
+            <h1>📈 股票交易AI系统</h1>
+            <nav class="nav">
+                <a href="{{ url_for('index') }}" class="nav-link {% if request.endpoint == 'index' %}active{% endif %}">首页</a>
+                <a href="{{ url_for('stock_page') }}" class="nav-link {% if request.endpoint == 'stock_page' %}active{% endif %}">股票</a>
+                <a href="{{ url_for('model_page') }}" class="nav-link {% if request.endpoint == 'model_page' %}active{% endif %}">模型</a>
+                <a href="{{ url_for('backtest_page') }}" class="nav-link {% if request.endpoint == 'backtest_page' %}active{% endif %}">回测</a>
+            </nav>
+        </header>
+
+        <!-- 主要内容 -->
+        <main class="main">
+            {% block content %}{% endblock %}
+        </main>
+
+        <!-- 页脚 -->
+        <footer class="footer">
+            <p>© 2026 股票交易AI系统 | 基于深度学习 | 使用腾讯财经数据</p>
+        </footer>
+    </div>
+
+    <!-- 加载JavaScript -->
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

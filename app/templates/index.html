@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+    <h2>🎯 系统概览</h2>
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="label">数据源状态</div>
+            <div class="value">✓ 正常</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">可用股票</div>
+            <div class="value" id="stock-count">-</div>
+        </div>
+        <div class="stat-card positive">
+            <div class="label">模型状态</div>
+            <div class="value">✓ 就绪</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">系统状态</div>
+            <div class="value" id="system-status">-</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>📋 功能介绍</h2>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+        <div style="padding: 15px; background: #f5f5f5; border-radius: 5px;">
+            <h3 style="color: #667eea; margin-bottom: 10px;">📊 股票查询</h3>
+            <p style="color: #666;">查询A股股票历史数据，包括开高低收、成交量等信息。支持实时数据获取和K线图展示。</p>
+        </div>
+        <div style="padding: 15px; background: #f5f5f5; border-radius: 5px;">
+            <h3 style="color: #667eea; margin-bottom: 10px;">🤖 模型预测</h3>
+            <p style="color: #666;">使用深度学习模型（LSTM/GRU）预测股价走势。提供预测准确率和可视化对比。</p>
+        </div>
+        <div style="padding: 15px; background: #f5f5f5; border-radius: 5px;">
+            <h3 style="color: #667eea; margin-bottom: 10px;">💰 回测系统</h3>
+            <p style="color: #666;">模拟历史交易，计算策略盈利率、最大回撤等指标。可视化展示收益曲线。</p>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>🚀 快速开始</h2>
+    <ol style="margin-left: 20px; color: #333; line-height: 2;">
+        <li>点击顶部导航的 <strong>股票</strong> 页面，选择股票代码</li>
+        <li>查看股票历史数据和K线图</li>
+        <li>在 <strong>模型</strong> 页面训练模型并预测</li>
+        <li>在 <strong>回测</strong> 页面测试交易策略</li>
+    </ol>
+</div>
+
+<div class="card">
+    <h2>📈 推荐股票</h2>
+    <div id="recommended-stocks"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 页面加载时获取数据
+document.addEventListener('DOMContentLoaded', async function() {
+    try {
+        // 获取股票列表
+        const response = await fetch('/api/stocks?limit=5');
+        const data = await response.json();
+
+        if (data.success) {
+            // 更新股票数量
+            document.getElementById('stock-count').textContent = data.data.length + '+';
+
+            // 显示推荐股票
+            const stocksHtml = data.data.map(stock => `
+                <div style="padding: 12px; margin: 8px 0; background: #f5f5f5; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <strong>${stock.code}</strong>
+                        <span style="margin-left: 10px; color: #666;">${stock.name}</span>
+                    </div>
+                    <a href="/stock?code=${stock.code}" class="btn btn-primary" style="padding: 5px 15px; font-size: 12px;">查看</a>
+                </div>
+            `).join('');
+
+            document.getElementById('recommended-stocks').innerHTML = stocksHtml;
+        }
+
+        // 检查系统状态
+        const healthResponse = await fetch('/api/health');
+        const healthData = await healthResponse.json();
+
+        if (healthData.status === 'ok') {
+            document.getElementById('system-status').textContent = '✓ 运行中';
+            document.getElementById('system-status').style.color = '#28a745';
+        } else {
+            document.getElementById('system-status').textContent = '✗ 异常';
+            document.getElementById('system-status').style.color = '#dc3545';
+        }
+
+    } catch (error) {
+        console.error('加载数据失败:', error);
+        document.getElementById('system-status').textContent = '✗ 错误';
+        document.getElementById('system-status').style.color = '#dc3545';
+    }
+});
+</script>
+{% endblock %}
