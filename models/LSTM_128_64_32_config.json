@@ -4,6 +4,6 @@
     12
   ],
   "epochs_trained": 5,
-  "final_train_loss": 0.018513988703489304,
-  "final_val_loss": 0.016762057319283485
+  "final_train_loss": 0.01954614371061325,
+  "final_val_loss": 0.015529405325651169
 }

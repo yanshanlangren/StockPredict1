@@ -57,14 +57,21 @@ class Backtester:
         """
         signals = []
         
-        for i in range(len(predictions)):
-            pred_change = (predictions[i] - actual_prices[i]) / actual_prices[i]
-            
-            if pred_change > threshold:
-                signals.append(1)  # 买入
-            elif pred_change < -threshold:
-                signals.append(-1)  # 卖出
-            else:
+        # 确保长度一致，取较小的长度
+        min_length = min(len(predictions), len(actual_prices))
+        
+        for i in range(min_length):
+            try:
+                pred_change = (predictions[i] - actual_prices[i]) / actual_prices[i]
+                
+                if pred_change > threshold:
+                    signals.append(1)  # 买入
+                elif pred_change < -threshold:
+                    signals.append(-1)  # 卖出
+                else:
+                    signals.append(0)  # 持有
+            except (ZeroDivisionError, IndexError) as e:
+                logger.warning(f"计算信号时出错（索引 {i}）: {e}")
                 signals.append(0)  # 持有
         
         return signals
@@ -92,7 +99,13 @@ class Backtester:
         
         for i, signal in enumerate(signals):
             current_price = actual_prices[i]
-            current_date = actual_dates.iloc[i]
+            # 处理日期 - DatetimeIndex 使用索引访问，Series/DataFrame 使用 .iloc
+            if isinstance(actual_dates, pd.DatetimeIndex):
+                current_date = actual_dates[i]
+            elif isinstance(actual_dates, (pd.Series, pd.DataFrame)):
+                current_date = actual_dates.iloc[i]
+            else:
+                current_date = actual_dates[i]
             
             # 记录组合价值
             portfolio_val = self.cash + self.position * current_price
@@ -140,7 +153,13 @@ class Backtester:
         # 最后一天强制平仓
         if self.position > 0:
             last_price = actual_prices[-1]
-            last_date = actual_dates.iloc[-1]
+            # 处理日期 - DatetimeIndex 使用索引访问
+            if isinstance(actual_dates, pd.DatetimeIndex):
+                last_date = actual_dates[-1]
+            elif isinstance(actual_dates, (pd.Series, pd.DataFrame)):
+                last_date = actual_dates.iloc[-1]
+            else:
+                last_date = actual_dates[-1]
             revenue = self.position * last_price * (1 - self.commission_rate)
             self.cash += revenue
             self.trades.append({

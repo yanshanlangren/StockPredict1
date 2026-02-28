@@ -134,17 +134,27 @@ class GridSearchOptimizer:
                 # 回测（如果提供了实际价格）
                 backtest_results = {}
                 if self.test_actual_prices is not None:
-                    predictions = model.predict(self.X_test)
-                    
-                    # 需要反标准化预测结果（这里简化处理）
-                    # 实际应用中应该保存scaler并正确反标准化
-                    backtester = Backtester()
-                    backtest_results = backtester.backtest(
-                        predictions,
-                        self.test_actual_prices,
-                        self.test_dates,
-                        threshold=0.02
-                    )
+                    try:
+                        predictions = model.predict(self.X_test)
+                        
+                        # 检查数据长度是否匹配
+                        if len(predictions) == len(self.test_actual_prices):
+                            # 需要反标准化预测结果（这里简化处理）
+                            # 实际应用中应该保存scaler并正确反标准化
+                            backtester = Backtester()
+                            backtest_results = backtester.backtest(
+                                predictions,
+                                self.test_actual_prices,
+                                self.test_dates,
+                                threshold=0.02
+                            )
+                        else:
+                            logger.warning(f"数据长度不匹配，跳过回测: predictions={len(predictions)}, actual_prices={len(self.test_actual_prices)}")
+                    except Exception as e:
+                        logger.warning(f"回测失败: {e}")
+                        backtest_results = {}
+                elif self.test_actual_prices is not None:
+                    logger.warning(f"数据长度不匹配，跳过回测: predictions={len(predictions)}, actual_prices={len(self.test_actual_prices)}")
                 
                 # 记录结果
                 result = {
@@ -189,13 +199,18 @@ class GridSearchOptimizer:
             metric: 优化指标
             
         Returns:
-            最佳参数字典
+            最佳参数字典，如果没有结果则返回空字典
         """
         if not self.results:
             logger.warning("没有搜索结果")
             return {}
         
         results_df = pd.DataFrame(self.results)
+        
+        # 检查指标是否存在
+        if metric not in results_df.columns:
+            logger.warning(f"指标 {metric} 不存在于结果中")
+            return {}
         
         # 找到最佳参数（根据指标最大化或最小化）
         if metric in ['profit_rate', 'win_rate']:

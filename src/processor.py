@@ -312,11 +312,20 @@ class DataProcessor:
         X_test = []
         y_test = []
         
-        for i in range(test_days):
+        # 确保有足够的数据
+        available_days = len(test_normalized) - sequence_length
+        actual_test_days = min(test_days, available_days)
+        
+        if actual_test_days < test_days:
+            logger.warning(f"请求数据天数 {test_days} 超过可用天数 {available_days}，将使用 {actual_test_days} 天")
+        
+        for i in range(actual_test_days):
             start_idx = i
             end_idx = i + sequence_length
             X_test.append(test_normalized.iloc[start_idx:end_idx][feature_cols].values)
             y_test.append(test_normalized.iloc[end_idx][target_col])
+        
+        logger.info(f"回测数据准备完成: X_test={len(X_test)}, y_test={len(y_test)}")
         
         return np.array(X_test), np.array(y_test), original_test_data
 

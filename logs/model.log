@@ -1,0 +1,76 @@
+2026-02-28 09:32:22,088 - src.optimizer - INFO - 开始网格搜索，预计最多尝试 1 次
+2026-02-28 09:32:22,089 - src.optimizer - INFO - 实际尝试 1 组参数
+2026-02-28 09:32:22,089 - src.optimizer - INFO - 
+============================================================
+2026-02-28 09:32:22,089 - src.optimizer - INFO - Trial 1/1
+2026-02-28 09:32:22,089 - src.optimizer - INFO - 参数: ([64, 32, 16], 0.4, 0.0005, 32, 'lstm')
+2026-02-28 09:32:22,181 - src.model - INFO - LSTM模型构建完成，参数数量: 35553
+2026-02-28 09:32:22,181 - src.model - INFO - 开始训练模型...
+2026-02-28 09:32:22,181 - src.model - INFO - 训练数据: X_train=(100, 60, 12), y_train=(100, 1)
+2026-02-28 09:32:27,942 - src.model - INFO - 模型训练完成
+2026-02-28 09:32:27,944 - src.model - INFO - 配置已保存到 /workspace/projects/models/trial_1_config.json
+2026-02-28 09:32:28,226 - src.model - INFO - 模型评估结果: {'loss': 0.07703439891338348, 'mae': 0.21343763172626495, 'mape': 294.3925476074219, 'mse': np.float64(0.07703440561969682), 'rmse': np.float64(0.2775507262099972)}
+2026-02-28 09:32:28,278 - src.backtest - INFO - 开始回测，共 20 个交易日
+2026-02-28 09:32:28,279 - src.backtest - INFO - 初始资金: 100000.00
+2026-02-28 09:32:28,279 - src.optimizer - WARNING - 回测失败: 'DatetimeIndex' object has no attribute 'iloc'
+2026-02-28 09:32:28,280 - src.optimizer - INFO - Trial 1 完成
+2026-02-28 09:32:28,280 - src.optimizer - INFO -   MAE: 0.2134
+2026-02-28 09:32:28,280 - src.optimizer - INFO -   MAPE: 294.39%
+2026-02-28 09:32:28,287 - src.optimizer - INFO - 
+网格搜索结果已保存到 /workspace/projects/results/grid_search_results.csv
+2026-02-28 09:32:28,288 - src.optimizer - INFO - 
+最佳参数（基于 profit_rate）:
+2026-02-28 09:32:28,289 - src.optimizer - INFO -   trial: 1
+2026-02-28 09:32:28,289 - src.optimizer - INFO -   model_type: lstm
+2026-02-28 09:32:28,289 - src.optimizer - INFO -   lstm_units: [64, 32, 16]
+2026-02-28 09:32:28,289 - src.optimizer - INFO -   dropout_rate: 0.4
+2026-02-28 09:32:28,290 - src.optimizer - INFO -   learning_rate: 0.0005
+2026-02-28 09:32:28,290 - src.optimizer - INFO -   batch_size: 32
+2026-02-28 09:32:28,290 - src.optimizer - INFO -   loss: 0.07703439891338348
+2026-02-28 09:32:28,290 - src.optimizer - INFO -   mae: 0.21343763172626495
+2026-02-28 09:32:28,290 - src.optimizer - INFO -   mape: 294.3925476074219
+2026-02-28 09:32:28,291 - src.optimizer - INFO -   profit_rate: 0
+2026-02-28 09:32:28,291 - src.optimizer - INFO -   win_rate: 0
+2026-02-28 09:32:28,291 - src.optimizer - INFO -   total_trades: 0
+2026-02-28 09:33:01,855 - src.optimizer - INFO - 开始网格搜索，预计最多尝试 1 次
+2026-02-28 09:33:01,856 - src.optimizer - INFO - 实际尝试 1 组参数
+2026-02-28 09:33:01,856 - src.optimizer - INFO - 
+============================================================
+2026-02-28 09:33:01,856 - src.optimizer - INFO - Trial 1/1
+2026-02-28 09:33:01,856 - src.optimizer - INFO - 参数: ([256, 128, 64], 0.2, 0.0001, 16, 'bidirectional')
+2026-02-28 09:33:01,995 - src.model - INFO - 双向LSTM模型构建完成，参数数量: 1216065
+2026-02-28 09:33:01,995 - src.model - INFO - 开始训练模型...
+2026-02-28 09:33:01,995 - src.model - INFO - 训练数据: X_train=(100, 60, 12), y_train=(100, 1)
+2026-02-28 09:33:15,074 - src.model - INFO - 模型训练完成
+2026-02-28 09:33:15,076 - src.model - INFO - 配置已保存到 /workspace/projects/models/trial_1_config.json
+2026-02-28 09:33:15,455 - src.model - INFO - 模型评估结果: {'loss': 0.06489669531583786, 'mae': 0.2189864218235016, 'mape': 184.37107849121094, 'mse': np.float64(0.06489669552885444), 'rmse': np.float64(0.25474829838264756)}
+2026-02-28 09:33:15,522 - src.backtest - INFO - 开始回测，共 20 个交易日
+2026-02-28 09:33:15,523 - src.backtest - INFO - 初始资金: 100000.00
+2026-02-28 09:33:15,525 - src.backtest - INFO - 回测完成!
+2026-02-28 09:33:15,525 - src.backtest - INFO - 最终资金: 100000.00
+2026-02-28 09:33:15,525 - src.backtest - INFO - 总收益: 0.00
+2026-02-28 09:33:15,526 - src.backtest - INFO - 收益率: 0.00%
+2026-02-28 09:33:15,526 - src.backtest - INFO - 基准收益率: -1.94%
+2026-02-28 09:33:15,526 - src.backtest - INFO - 超额收益: 1.94%
+2026-02-28 09:33:15,526 - src.backtest - INFO - 交易次数: 0
+2026-02-28 09:33:15,527 - src.backtest - INFO - 胜率: 0.00%
+2026-02-28 09:33:15,527 - src.optimizer - INFO - Trial 1 完成
+2026-02-28 09:33:15,527 - src.optimizer - INFO -   MAE: 0.2190
+2026-02-28 09:33:15,527 - src.optimizer - INFO -   MAPE: 184.37%
+2026-02-28 09:33:15,527 - src.optimizer - INFO -   收益率: 0.00%
+2026-02-28 09:33:15,533 - src.optimizer - INFO - 
+网格搜索结果已保存到 /workspace/projects/results/grid_search_results.csv
+2026-02-28 09:33:15,535 - src.optimizer - INFO - 
+最佳参数（基于 profit_rate）:
+2026-02-28 09:33:15,535 - src.optimizer - INFO -   trial: 1
+2026-02-28 09:33:15,535 - src.optimizer - INFO -   model_type: bidirectional
+2026-02-28 09:33:15,536 - src.optimizer - INFO -   lstm_units: [256, 128, 64]
+2026-02-28 09:33:15,536 - src.optimizer - INFO -   dropout_rate: 0.2
+2026-02-28 09:33:15,536 - src.optimizer - INFO -   learning_rate: 0.0001
+2026-02-28 09:33:15,536 - src.optimizer - INFO -   batch_size: 16
+2026-02-28 09:33:15,537 - src.optimizer - INFO -   loss: 0.06489669531583786
+2026-02-28 09:33:15,537 - src.optimizer - INFO -   mae: 0.2189864218235016
+2026-02-28 09:33:15,537 - src.optimizer - INFO -   mape: 184.37107849121094
+2026-02-28 09:33:15,537 - src.optimizer - INFO -   profit_rate: 0.0
+2026-02-28 09:33:15,537 - src.optimizer - INFO -   win_rate: 0
+2026-02-28 09:33:15,537 - src.optimizer - INFO -   total_trades: 0
