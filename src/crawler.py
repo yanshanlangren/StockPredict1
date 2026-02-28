@@ -27,6 +27,33 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def retry_request(max_retries=3, delay=2):
+    """
+    请求重试装饰器
+    
+    Args:
+        max_retries: 最大重试次数
+        delay: 重试延迟（秒）
+    """
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except (requests.exceptions.ConnectionError, 
+                       requests.exceptions.Timeout,
+                       requests.exceptions.RemoteDisconnected) as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"请求失败，第 {attempt + 1}/{max_retries} 次重试... 错误: {e}")
+                        time.sleep(delay * (attempt + 1))
+                    else:
+                        logger.error(f"请求失败，已达到最大重试次数 {max_retries}")
+                        raise
+            return None
+        return wrapper
+    return decorator
+
+
 class EastMoneyCrawler:
     """东方财富数据爬虫"""
 
@@ -38,6 +65,7 @@ class EastMoneyCrawler:
         self.stock_list_url = "http://82.push2.eastmoney.com/api/qt/clist/get"
         self.kline_url = "http://push2his.eastmoney.com/api/qt/stock/kline/get"
 
+    @retry_request(max_retries=3, delay=2)
     def get_stock_list(self, market='0,1') -> pd.DataFrame:
         """
         获取A股股票列表
@@ -64,7 +92,7 @@ class EastMoneyCrawler:
         }
 
         try:
-            response = requests.get(self.stock_list_url, params=params, headers=self.headers)
+            response = requests.get(self.stock_list_url, params=params, headers=self.headers, timeout=30)
             response.raise_for_status()
             data = response.json()
 
@@ -100,6 +128,7 @@ class EastMoneyCrawler:
             logger.error(f"获取股票列表失败: {e}")
             return pd.DataFrame()
 
+    @retry_request(max_retries=3, delay=2)
     def get_stock_kline(self, stock_code: str, klt: int = 101, start_date: str = None, end_date: str = None) -> pd.DataFrame:
         """
         获取个股K线数据
@@ -136,7 +165,7 @@ class EastMoneyCrawler:
         }
 
         try:
-            response = requests.get(self.kline_url, params=params, headers=self.headers)
+            response = requests.get(self.kline_url, params=params, headers=self.headers, timeout=30)
             response.raise_for_status()
             data = response.json()
 
@@ -202,7 +231,7 @@ class EastMoneyCrawler:
                     failed_stocks.append(stock_code)
                     logger.warning(f"  数据不足，跳过")
                 
-                time.sleep(0.5)  # 避免请求过快
+                time.sleep(1.5)  # 增加延迟，避免请求过快被封禁
                 
             except Exception as e:
                 failed_stocks.append(stock_code)
