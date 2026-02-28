@@ -94,3 +94,66 @@
 2026-02-28 15:43:22,701 - src.crawler - WARNING - 请求失败，第 2/3 次重试... 错误: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
 2026-02-28 15:43:26,766 - src.crawler - WARNING - 获取股票 600006 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
 2026-02-28 15:43:26,767 - src.crawler - ERROR - 请求失败，已达到最大重试次数 3
+2026-02-28 15:54:27,017 - __main__ - INFO - 腾讯财经爬虫初始化成功
+2026-02-28 15:54:27,017 - __main__ - INFO - 东方财富爬虫初始化成功
+2026-02-28 15:54:27,018 - __main__ - INFO - 尝试使用数据源: tencent
+2026-02-28 15:54:27,018 - tencent_crawler - INFO - 开始获取股票 sh600000 K线数据...
+2026-02-28 15:54:27,475 - tencent_crawler - INFO - 成功获取股票 sh600000 数据，共 16 天
+2026-02-28 15:54:27,475 - __main__ - INFO - ✓ 使用腾讯财经成功获取数据
+2026-02-28 15:54:27,481 - __main__ - INFO - 尝试使用数据源获取股票列表: tencent
+2026-02-28 15:54:27,481 - tencent_crawler - INFO - 开始获取股票列表...
+2026-02-28 15:54:33,246 - tencent_crawler - INFO - 成功获取股票列表，共 10 只
+2026-02-28 15:54:33,246 - __main__ - INFO - ✓ 使用腾讯财经成功获取股票列表
+2026-02-28 15:54:33,249 - __main__ - INFO - 开始批量获取 3 只股票的数据...
+2026-02-28 15:54:33,249 - __main__ - INFO - 尝试使用数据源: tencent
+2026-02-28 15:54:33,250 - tencent_crawler - INFO - 开始获取股票 sh600004 K线数据...
+2026-02-28 15:54:33,606 - tencent_crawler - INFO - 成功获取股票 sh600004 数据，共 16 天
+2026-02-28 15:54:33,607 - __main__ - INFO - ✓ 使用腾讯财经成功获取数据
+2026-02-28 15:54:33,607 - __main__ - INFO - 尝试使用数据源: tencent
+2026-02-28 15:54:33,608 - tencent_crawler - INFO - 开始获取股票 sh600006 K线数据...
+2026-02-28 15:54:34,415 - tencent_crawler - INFO - 成功获取股票 sh600006 数据，共 16 天
+2026-02-28 15:54:34,416 - __main__ - INFO - ✓ 使用腾讯财经成功获取数据
+2026-02-28 15:54:34,416 - __main__ - INFO - 尝试使用数据源: tencent
+2026-02-28 15:54:34,416 - tencent_crawler - INFO - 开始获取股票 sh600007 K线数据...
+2026-02-28 15:54:34,886 - tencent_crawler - INFO - 成功获取股票 sh600007 数据，共 16 天
+2026-02-28 15:54:34,886 - __main__ - INFO - ✓ 使用腾讯财经成功获取数据
+2026-02-28 15:54:34,887 - __main__ - INFO - 批量获取完成: 成功 3, 失败 0
+2026-02-28 15:55:17,475 - data_source_manager - INFO - 腾讯财经爬虫初始化成功
+2026-02-28 15:55:17,476 - data_source_manager - INFO - 东方财富爬虫初始化成功
+2026-02-28 15:55:17,477 - tencent_crawler - INFO - 开始获取股票 sh600000 K线数据...
+2026-02-28 15:55:18,141 - tencent_crawler - INFO - 成功获取股票 sh600000 数据，共 16 天
+2026-02-28 15:55:18,158 - data_source_manager - WARNING - 模拟数据缺少code列
+2026-02-28 15:55:18,160 - data_source_manager - INFO - 尝试使用数据源: tencent
+2026-02-28 15:55:18,160 - tencent_crawler - INFO - 开始获取股票 sh600000 K线数据...
+2026-02-28 15:55:18,614 - tencent_crawler - INFO - 成功获取股票 sh600000 数据，共 16 天
+2026-02-28 15:55:18,614 - data_source_manager - INFO - ✓ 使用腾讯财经成功获取数据
+2026-02-28 15:55:18,615 - data_source_manager - INFO - 首选数据源已设置为: mock
+2026-02-28 15:55:18,615 - data_source_manager - INFO - 尝试使用数据源: mock
+2026-02-28 15:55:18,626 - data_source_manager - WARNING - 模拟数据缺少code列
+2026-02-28 15:55:18,627 - data_source_manager - INFO - 尝试使用数据源: tencent
+2026-02-28 15:55:18,627 - tencent_crawler - INFO - 开始获取股票 sh600000 K线数据...
+2026-02-28 15:55:19,011 - tencent_crawler - INFO - 成功获取股票 sh600000 数据，共 16 天
+2026-02-28 15:55:19,012 - data_source_manager - INFO - ✓ 使用腾讯财经成功获取数据
+2026-02-28 15:55:19,012 - data_source_manager - INFO - 首选数据源已设置为: tencent
+2026-02-28 15:55:19,012 - data_source_manager - INFO - 开始批量获取 5 只股票的数据...
+2026-02-28 15:55:19,012 - data_source_manager - INFO - 尝试使用数据源: tencent
+2026-02-28 15:55:19,013 - tencent_crawler - INFO - 开始获取股票 sh600000 K线数据...
+2026-02-28 15:55:19,953 - tencent_crawler - INFO - 成功获取股票 sh600000 数据，共 16 天
+2026-02-28 15:55:19,954 - data_source_manager - INFO - ✓ 使用腾讯财经成功获取数据
+2026-02-28 15:55:19,954 - data_source_manager - INFO - 尝试使用数据源: tencent
+2026-02-28 15:55:19,954 - tencent_crawler - INFO - 开始获取股票 sh600004 K线数据...
+2026-02-28 15:55:20,484 - tencent_crawler - INFO - 成功获取股票 sh600004 数据，共 16 天
+2026-02-28 15:55:20,484 - data_source_manager - INFO - ✓ 使用腾讯财经成功获取数据
+2026-02-28 15:55:20,485 - data_source_manager - INFO - 尝试使用数据源: tencent
+2026-02-28 15:55:20,485 - tencent_crawler - INFO - 开始获取股票 sh600006 K线数据...
+2026-02-28 15:55:20,990 - tencent_crawler - INFO - 成功获取股票 sh600006 数据，共 16 天
+2026-02-28 15:55:20,990 - data_source_manager - INFO - ✓ 使用腾讯财经成功获取数据
+2026-02-28 15:55:20,990 - data_source_manager - INFO - 尝试使用数据源: tencent
+2026-02-28 15:55:20,990 - tencent_crawler - INFO - 开始获取股票 sh600007 K线数据...
+2026-02-28 15:55:21,401 - tencent_crawler - INFO - 成功获取股票 sh600007 数据，共 16 天
+2026-02-28 15:55:21,402 - data_source_manager - INFO - ✓ 使用腾讯财经成功获取数据
+2026-02-28 15:55:21,402 - data_source_manager - INFO - 尝试使用数据源: tencent
+2026-02-28 15:55:21,402 - tencent_crawler - INFO - 开始获取股票 sh600008 K线数据...
+2026-02-28 15:55:21,876 - tencent_crawler - INFO - 成功获取股票 sh600008 数据，共 16 天
+2026-02-28 15:55:21,877 - data_source_manager - INFO - ✓ 使用腾讯财经成功获取数据
+2026-02-28 15:55:21,877 - data_source_manager - INFO - 批量获取完成: 成功 5, 失败 0
