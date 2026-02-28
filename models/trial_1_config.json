@@ -1,0 +1,9 @@
+{
+  "input_shape": [
+    60,
+    12
+  ],
+  "epochs_trained": 50,
+  "final_train_loss": 0.007933586835861206,
+  "final_val_loss": 0.005672330502420664
+}
