@@ -43,3 +43,54 @@
 2026-02-28 10:11:25,922 - src.crawler - INFO - 开始获取股票列表...
 2026-02-28 10:11:25,997 - src.crawler - WARNING - 获取股票列表时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
 2026-02-28 10:11:25,997 - src.crawler - ERROR - 请求失败，已达到最大重试次数 3
+2026-02-28 15:41:58,708 - src.crawler - INFO - 开始获取股票列表...
+2026-02-28 15:41:58,826 - src.crawler - WARNING - 获取股票列表时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:41:58,827 - src.crawler - WARNING - 请求失败，第 1/3 次重试... 错误: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:42:00,827 - src.crawler - INFO - 开始获取股票列表...
+2026-02-28 15:42:00,888 - src.crawler - WARNING - 获取股票列表时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:42:00,889 - src.crawler - WARNING - 请求失败，第 2/3 次重试... 错误: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:42:04,889 - src.crawler - INFO - 开始获取股票列表...
+2026-02-28 15:42:04,960 - src.crawler - WARNING - 获取股票列表时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:42:04,961 - src.crawler - ERROR - 请求失败，已达到最大重试次数 3
+2026-02-28 15:42:05,026 - src.crawler - WARNING - 获取股票 600000 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:42:05,026 - src.crawler - WARNING - 请求失败，第 1/3 次重试... 错误: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:42:07,071 - src.crawler - WARNING - 获取股票 600000 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:42:07,071 - src.crawler - WARNING - 请求失败，第 2/3 次重试... 错误: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:42:11,124 - src.crawler - WARNING - 获取股票 600000 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:42:11,124 - src.crawler - ERROR - 请求失败，已达到最大重试次数 3
+2026-02-28 15:42:43,728 - src.crawler - WARNING - 获取股票 600000 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:42:43,728 - src.crawler - WARNING - 请求失败，第 1/3 次重试... 错误: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:42:45,784 - src.crawler - WARNING - 获取股票 600000 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:42:45,784 - src.crawler - WARNING - 请求失败，第 2/3 次重试... 错误: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:42:49,852 - src.crawler - WARNING - 获取股票 600000 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:42:49,852 - src.crawler - ERROR - 请求失败，已达到最大重试次数 3
+2026-02-28 15:42:54,906 - src.crawler - WARNING - 获取股票 600000 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:42:54,906 - src.crawler - WARNING - 请求失败，第 1/3 次重试... 错误: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:42:56,965 - src.crawler - WARNING - 获取股票 600000 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:42:56,966 - src.crawler - WARNING - 请求失败，第 2/3 次重试... 错误: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:01,030 - src.crawler - WARNING - 获取股票 600000 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:01,030 - src.crawler - ERROR - 请求失败，已达到最大重试次数 3
+2026-02-28 15:43:01,087 - src.crawler - WARNING - 获取股票 600001 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:01,087 - src.crawler - WARNING - 请求失败，第 1/3 次重试... 错误: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:03,144 - src.crawler - WARNING - 获取股票 600001 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:03,144 - src.crawler - WARNING - 请求失败，第 2/3 次重试... 错误: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:07,222 - src.crawler - WARNING - 获取股票 600001 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:07,222 - src.crawler - ERROR - 请求失败，已达到最大重试次数 3
+2026-02-28 15:43:07,274 - src.crawler - WARNING - 获取股票 600004 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:07,274 - src.crawler - WARNING - 请求失败，第 1/3 次重试... 错误: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:10,354 - src.crawler - WARNING - 获取股票 600004 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:10,354 - src.crawler - WARNING - 请求失败，第 2/3 次重试... 错误: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:14,412 - src.crawler - WARNING - 获取股票 600004 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:14,412 - src.crawler - ERROR - 请求失败，已达到最大重试次数 3
+2026-02-28 15:43:14,468 - src.crawler - WARNING - 获取股票 600005 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:14,468 - src.crawler - WARNING - 请求失败，第 1/3 次重试... 错误: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:16,525 - src.crawler - WARNING - 获取股票 600005 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:16,526 - src.crawler - WARNING - 请求失败，第 2/3 次重试... 错误: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:20,583 - src.crawler - WARNING - 获取股票 600005 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:20,583 - src.crawler - ERROR - 请求失败，已达到最大重试次数 3
+2026-02-28 15:43:20,643 - src.crawler - WARNING - 获取股票 600006 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:20,643 - src.crawler - WARNING - 请求失败，第 1/3 次重试... 错误: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:22,701 - src.crawler - WARNING - 获取股票 600006 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:22,701 - src.crawler - WARNING - 请求失败，第 2/3 次重试... 错误: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:26,766 - src.crawler - WARNING - 获取股票 600006 K线数据时出错: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-02-28 15:43:26,767 - src.crawler - ERROR - 请求失败，已达到最大重试次数 3
