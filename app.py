@@ -678,13 +678,15 @@ def _mock_prediction(stock_code: str, request_obj):
 
         return jsonify({
             'success': True,
-            'predictions': predictions,
-            'accuracy': accuracy,
-            'chart_data': chart_data,
-            'latest_price': latest_price,
-            'days_used': len(df),
-            'message': '使用模拟预测（TensorFlow不可用）',
-            'mode': 'mock'
+            'mode': 'mock',
+            'data': {
+                'predictions': predictions,
+                'accuracy': accuracy,
+                'chart_data': chart_data,
+                'latest_price': latest_price,
+                'days_used': len(df),
+                'message': '使用模拟预测（TensorFlow不可用）'
+            }
         })
 
     except Exception as e:
