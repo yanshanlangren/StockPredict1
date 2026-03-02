@@ -9,28 +9,42 @@
 
 ## 🎯 环境要求
 
-- **Python**: 3.6+ (已测试兼容Python 3.6、3.7、3.8)
+### 完整版（推荐）⭐
+- **Python**: >= 3.8
 - **操作系统**: Windows / macOS / Linux
+
+### 轻量版（功能受限）
+- **Python**: >= 3.6
+- **操作系统**: Windows / macOS / Linux
+
+⚠️ **重要**: Python 3.6不支持akshare和TensorFlow，请查看[Python版本说明](PYTHON_VERSION.md)了解详情。
 
 ## 📦 安装依赖
 
+### 完整版安装（Python 3.8+）
+```bash
+pip install -r requirements_full.txt
+```
+
+### 轻量版安装（Python 3.6+）
 ```bash
 pip install -r requirements.txt
 ```
 
-### 主要依赖
-- pandas 1.1.0+ (数据处理)
-- numpy 1.18.0+ (数值计算)
+### 主要依赖（完整版）
+- pandas 2.0.0+ (数据处理)
+- numpy 1.26.0+ (数值计算)
 - tensorflow 2.4.0+ (深度学习)
 - flask 1.1.0+ (Web应用)
+- akshare 1.16.0+ (数据获取)
 - scikit-learn 0.24.0+ (机器学习)
 
 ## 🚀 快速开始
 
-### 方式1: 使用Web应用（推荐）⭐
+### 完整版（Python 3.8+）
 
 ```bash
-# 启动Web服务
+# 启动Web服务（完整功能）
 python3 app.py
 
 # 访问浏览器
@@ -39,6 +53,21 @@ python3 app.py
 # 模型: http://localhost:5000/model
 # 回测: http://localhost:5000/backtest
 ```
+
+### 轻量版（Python 3.6+）
+
+```bash
+# 启动Web服务（功能受限）
+python3 app_test.py
+
+# 访问浏览器（仅模拟数据）
+# 首页: http://localhost:5000/
+# 股票: http://localhost:5000/stock
+# 模型: http://localhost:5000/model
+# 回测: http://localhost:5000/backtest
+```
+
+⚠️ **注意**: 轻量版不支持真实数据获取和深度学习模型，请使用Python 3.8+获得完整功能。
 
 ### 方式2: 命令行方式
 

@@ -12,8 +12,13 @@
 
 ## 🔧 环境配置
 
-### 推荐环境
-- **Python版本**: 3.6 或更高版本
+### 完整版（推荐）
+- **Python版本**: >= 3.8
+- **内存**: 4GB+
+- **磁盘**: 2GB+ 可用空间
+
+### 轻量版（功能受限）
+- **Python版本**: >= 3.6
 - **内存**: 4GB+
 - **磁盘**: 1GB+ 可用空间
 
@@ -25,7 +30,11 @@ python3 --version
 python --version
 ```
 
-如果版本低于3.6，请先升级Python。
+**如果Python版本 < 3.8**:
+- 可以使用轻量版（功能受限）
+- 或升级到Python 3.8+以获得完整功能
+
+📖 **详细说明**: 请查看 [PYTHON_VERSION.md](PYTHON_VERSION.md) 了解更多关于Python版本和功能的信息。
 
 ---
 
@@ -50,17 +59,58 @@ venv\Scripts\activate
 ```
 
 ### 3. 安装依赖
+
+#### 完整版（Python 3.8+）
 ```bash
 # 升级pip
 pip install --upgrade pip
 
-# 安装项目依赖
+# 安装完整依赖
+pip install -r requirements_full.txt
+```
+
+#### 轻量版（Python 3.6+）
+```bash
+# 升级pip
+pip install --upgrade pip
+
+# 安装轻量版依赖
 pip install -r requirements.txt
 ```
 
+⚠️ **注意**: 轻量版不支持akshare和TensorFlow，功能受限。
+
 ### 依赖安装常见问题
 
-#### 问题1: TensorFlow安装失败
+#### 问题1: Python版本过低
+**解决方案**:
+```bash
+# 检查Python版本
+python --version
+
+# 如果版本 < 3.8，升级Python
+# Ubuntu/Debian:
+sudo apt install python3.8
+
+# macOS (Homebrew):
+brew install python@3.8
+
+# Windows:
+# 从 https://www.python.org/downloads/ 下载安装
+```
+
+#### 问题2: akshare安装失败（Python 3.6）
+**解决方案**:
+akshare要求Python >= 3.8，如果使用Python 3.6，只能使用轻量版：
+```bash
+# 安装轻量版依赖（不含akshare）
+pip install -r requirements.txt
+
+# 使用测试版应用
+python app_test.py
+```
+
+#### 问题3: TensorFlow安装失败
 **解决方案**:
 ```bash
 # 如果pip安装失败，尝试使用conda
@@ -70,7 +120,7 @@ conda install tensorflow
 pip install tensorflow==2.4.0
 ```
 
-#### 问题2: pandas/numpy版本冲突
+#### 问题4: pandas/numpy版本冲突
 **解决方案**:
 ```bash
 # 重新安装pandas和numpy
@@ -82,7 +132,7 @@ pip install pandas==1.1.5 numpy==1.19.5
 
 ## 🚀 快速开始
 
-### 启动Web应用
+### 启动完整版应用（Python 3.8+）
 ```bash
 # 启动Flask服务
 python3 app.py
@@ -91,6 +141,23 @@ python3 app.py
 看到以下提示表示启动成功：
 ```
  * Running on http://0.0.0.0:5000/ (Press CTRL+C to quit)
+```
+
+### 启动轻量版应用（Python 3.6+）
+```bash
+# 启动Flask测试版服务
+python3 app_test.py
+```
+
+看到以下提示表示启动成功：
+```
+============================================================
+股票交易AI系统 - Flask Web应用
+版本: 2.0 (测试版 - 无TensorFlow)
+============================================================
+🚀 启动Flask服务...
+📝 访问地址: http://localhost:5000/
+ * Running on http://0.0.0.0:5000/
 ```
 
 ### 访问应用
