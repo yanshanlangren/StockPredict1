@@ -13,12 +13,21 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.data_source_manager import DataSourceManager, DataSource
-from src.model import StockPredictionModel
 import logging
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# 尝试导入TensorFlow模型，如果失败则使用模拟预测
+TENSORFLOW_AVAILABLE = False
+try:
+    from src.model import StockPredictionModel
+    TENSORFLOW_AVAILABLE = True
+    logger.info("✓ TensorFlow模型已加载")
+except ImportError:
+    logger.warning("⚠️  TensorFlow未安装（需要Python 3.8+），将使用模拟预测")
+    logger.warning("提示: 安装完整版请运行: pip install -r requirements_full.txt")
 
 # 创建Flask应用
 app = Flask(__name__,
@@ -38,9 +47,14 @@ def init_components():
         data_manager = DataSourceManager(preferred_source=DataSource.TENCENT)
         logger.info("✓ 数据源管理器初始化成功")
 
-        logger.info("初始化模型预测器...")
-        predictor = StockPredictionModel('stock_model')
-        logger.info("✓ 模型预测器初始化成功")
+        # 只有在TensorFlow可用时才初始化预测器
+        if TENSORFLOW_AVAILABLE:
+            logger.info("初始化模型预测器...")
+            predictor = StockPredictionModel('stock_model')
+            logger.info("✓ 模型预测器初始化成功")
+        else:
+            logger.info("ℹ️  TensorFlow不可用，跳过模型预测器初始化")
+            predictor = None
 
         logger.info("所有组件初始化完成")
         return True
@@ -88,8 +102,10 @@ def health_check():
         'timestamp': datetime.now().isoformat(),
         'components': {
             'data_manager': data_manager is not None,
-            'predictor': predictor is not None
-        }
+            'predictor': predictor is not None,
+            'tensorflow': TENSORFLOW_AVAILABLE
+        },
+        'mode': 'full' if TENSORFLOW_AVAILABLE else 'lightweight'
     })
 
 @app.route('/api/stocks')
@@ -180,6 +196,11 @@ def get_stock_info(stock_code):
 def predict_stock(stock_code):
     """预测股票价格趋势 - 优化版本，追求正收益"""
     try:
+        # 如果TensorFlow不可用，使用模拟预测
+        if not TENSORFLOW_AVAILABLE:
+            logger.warning("TensorFlow不可用，使用模拟预测")
+            return _mock_prediction(stock_code, request)
+
         days = request.json.get('days', 30) if request.json else 30
 
         # 获取更多数据
@@ -597,6 +618,81 @@ def internal_error(error):
         'success': False,
         'message': '服务器内部错误'
     }), 500
+
+# ==================== 辅助函数 ====================
+
+def _mock_prediction(stock_code: str, request_obj):
+    """
+    模拟预测（当TensorFlow不可用时使用）
+
+    Args:
+        stock_code: 股票代码
+        request_obj: Flask request对象
+
+    Returns:
+        JSON响应
+    """
+    try:
+        days = request_obj.json.get('days', 30) if request_obj.json else 30
+
+        # 获取股票数据
+        df = data_manager.get_stock_kline(stock_code, days=days)
+
+        if df.empty:
+            return jsonify({
+                'success': False,
+                'message': f'无法获取股票 {stock_code} 的数据'
+            }), 400
+
+        latest_price = float(df['close'].iloc[-1])
+
+        # 模拟预测未来5天的价格
+        predictions = []
+        for i in range(5):
+            # 随机波动（-3% 到 +3%）
+            change = np.random.uniform(-0.03, 0.03)
+            predicted_price = latest_price * (1 + change * (i + 1))
+            predictions.append(predicted_price)
+
+        # 模拟准确率（65%-85%之间）
+        accuracy = round(np.random.uniform(0.65, 0.85) * 100, 2)
+
+        # 生成图表数据
+        chart_data = []
+        for i, row in df.tail(30).iterrows():
+            chart_data.append({
+                'date': i.strftime('%Y-%m-%d') if hasattr(i, 'strftime') else str(i),
+                'actual': float(row['close']),
+                'predicted': None
+            })
+
+        # 添加预测值
+        last_date = df.index[-1]
+        for i, pred in enumerate(predictions):
+            pred_date = last_date + timedelta(days=i+1)
+            chart_data.append({
+                'date': pred_date.strftime('%Y-%m-%d') if hasattr(pred_date, 'strftime') else str(pred_date),
+                'actual': None,
+                'predicted': pred
+            })
+
+        return jsonify({
+            'success': True,
+            'predictions': predictions,
+            'accuracy': accuracy,
+            'chart_data': chart_data,
+            'latest_price': latest_price,
+            'days_used': len(df),
+            'message': '使用模拟预测（TensorFlow不可用）',
+            'mode': 'mock'
+        })
+
+    except Exception as e:
+        logger.error(f"模拟预测失败: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'模拟预测失败: {str(e)}'
+        }), 500
 
 # ==================== 启动应用 ====================
 

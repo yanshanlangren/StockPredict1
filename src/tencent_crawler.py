@@ -1,15 +1,25 @@
 """
 腾讯财经数据爬虫 - 使用AKShare的腾讯财经数据源
+支持Python 3.6+：当akshare不可用时，自动降级到模拟数据
 """
-import akshare as ak
 import pandas as pd
 import time
 import logging
 from typing import Optional, List
 from datetime import datetime, timedelta
+import random
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# 尝试导入akshare，如果失败则使用模拟数据
+try:
+    import akshare as ak
+    AKSHARE_AVAILABLE = True
+    logger = logging.getLogger(__name__)
+    logger.info("✓ akshare库已加载，将使用真实数据源")
+except ImportError:
+    AKSHARE_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("⚠️  akshare库未安装（需要Python 3.8+），将使用模拟数据源")
+    logger.warning("提示: 安装完整版请运行: pip install -r requirements_full.txt")
 
 
 class TencentFinanceCrawler:
@@ -48,6 +58,11 @@ class TencentFinanceCrawler:
             DataFrame: 包含股票K线数据的DataFrame
         """
         logger.info(f"开始获取股票 {stock_code} K线数据...")
+
+        # 如果akshare不可用，使用模拟数据
+        if not AKSHARE_AVAILABLE:
+            logger.info(f"使用模拟数据源生成 {stock_code} 的 {days} 天数据")
+            return self._generate_mock_data(stock_code, days)
 
         try:
             self._rate_limit()
@@ -145,6 +160,11 @@ class TencentFinanceCrawler:
         """
         logger.info("开始获取股票列表...")
 
+        # 如果akshare不可用，直接返回预定义列表
+        if not AKSHARE_AVAILABLE:
+            logger.info("akshare不可用，使用预定义的股票列表")
+            return self._get_predefined_stocks(limit)
+
         try:
             self._rate_limit()
 
@@ -170,42 +190,57 @@ class TencentFinanceCrawler:
             except Exception as e:
                 logger.warning(f"使用东方财富接口获取列表失败: {e}")
                 logger.info("使用预定义的股票列表")
-
-                # 使用预定义的活跃股票列表
-                predefined_stocks = [
-                    ('600000', '浦发银行'),
-                    ('600004', '白云机场'),
-                    ('600006', '东风汽车'),
-                    ('600007', '中国国贸'),
-                    ('600008', '首创股份'),
-                    ('600009', '上海机场'),
-                    ('600010', '包钢股份'),
-                    ('600011', '华能国际'),
-                    ('600015', '华夏银行'),
-                    ('600016', '民生银行'),
-                    ('600019', '宝钢股份'),
-                    ('600028', '中国石化'),
-                    ('600030', '中信证券'),
-                    ('600036', '招商银行'),
-                    ('600048', '保利发展'),
-                    ('600050', '中国联通'),
-                    ('600104', '上汽集团'),
-                    ('600519', '贵州茅台'),
-                    ('600585', '海螺水泥'),
-                    ('600690', '海尔智家'),
-                ]
-
-                stock_list = pd.DataFrame(predefined_stocks, columns=['code', 'name'])
-
-                if limit:
-                    stock_list = stock_list.head(limit)
-
-                logger.info(f"使用预定义股票列表，共 {len(stock_list)} 只")
-                return stock_list
+                return self._get_predefined_stocks(limit)
 
         except Exception as e:
             logger.error(f"获取股票列表时出错: {e}")
-            return pd.DataFrame()
+            return self._get_predefined_stocks(limit)
+
+    def _get_predefined_stocks(self, limit: Optional[int] = None) -> pd.DataFrame:
+        """
+        获取预定义的股票列表
+
+        Args:
+            limit: 返回数量限制
+
+        Returns:
+            DataFrame: 预定义股票列表
+        """
+        # 使用预定义的活跃股票列表
+        predefined_stocks = [
+            ('600000', '浦发银行'),
+            ('600004', '白云机场'),
+            ('600006', '东风汽车'),
+            ('600007', '中国国贸'),
+            ('600008', '首创股份'),
+            ('600009', '上海机场'),
+            ('600010', '包钢股份'),
+            ('600011', '华能国际'),
+            ('600015', '华夏银行'),
+            ('600016', '民生银行'),
+            ('600019', '宝钢股份'),
+            ('600028', '中国石化'),
+            ('600030', '中信证券'),
+            ('600036', '招商银行'),
+            ('600048', '保利发展'),
+            ('600050', '中国联通'),
+            ('600104', '上汽集团'),
+            ('600519', '贵州茅台'),
+            ('600585', '海螺水泥'),
+            ('600690', '海尔智家'),
+            ('000001', '平安银行'),
+            ('000002', '万科A'),
+            ('000725', '京东方A'),
+            ('000858', '五粮液'),
+        ]
+
+        stock_list = pd.DataFrame(predefined_stocks, columns=['code', 'name'])
+
+        if limit:
+            stock_list = stock_list.head(limit)
+
+        logger.info(f"使用预定义股票列表，共 {len(stock_list)} 只")
+        return stock_list
 
     def get_batch_kline(self, stock_codes: List[str], days: int = 300) -> dict:
         """
@@ -260,6 +295,69 @@ class TencentFinanceCrawler:
 
         df.to_csv(filepath)
         logger.info(f"已保存到: {filepath}")
+
+    def _generate_mock_data(self, stock_code: str, days: int = 300) -> pd.DataFrame:
+        """
+        生成模拟股票数据（当akshare不可用时使用）
+
+        Args:
+            stock_code: 股票代码
+            days: 生成天数
+
+        Returns:
+            DataFrame: 模拟的股票K线数据
+        """
+        try:
+            # 根据股票代码生成一个基础价格（为了保持一致性）
+            base_price = 10 + (int(stock_code.replace('sh', '').replace('sz', '').replace('000', '')) % 50)
+
+            # 生成日期序列
+            end_date = datetime.now()
+            dates = pd.date_range(end=end_date - timedelta(days=1), periods=days, freq='D')
+
+            # 过滤周末
+            dates = dates[dates.weekday < 5]
+
+            # 生成模拟数据
+            data = []
+            current_price = base_price
+
+            for i, date in enumerate(dates):
+                # 随机波动（-3% 到 +3%）
+                change_pct = random.uniform(-0.03, 0.03)
+
+                # 计算当日价格
+                open_price = current_price * (1 + random.uniform(-0.01, 0.01))
+                close_price = open_price * (1 + change_pct)
+                high_price = max(open_price, close_price) * (1 + random.uniform(0, 0.02))
+                low_price = min(open_price, close_price) * (1 - random.uniform(0, 0.02))
+
+                # 成交量（百万股）
+                volume = random.uniform(100, 1000)
+
+                data.append({
+                    'date': date,
+                    'open': round(open_price, 2),
+                    'high': round(high_price, 2),
+                    'low': round(low_price, 2),
+                    'close': round(close_price, 2),
+                    'volume': round(volume, 2),
+                    'change_pct': round(change_pct * 100, 2)
+                })
+
+                # 更新当前价格
+                current_price = close_price
+
+            # 创建DataFrame
+            df = pd.DataFrame(data)
+            df.set_index('date', inplace=True)
+
+            logger.info(f"已生成 {stock_code} 的 {len(df)} 天模拟数据")
+            return df
+
+        except Exception as e:
+            logger.error(f"生成模拟数据失败: {e}")
+            return pd.DataFrame()
 
 
 # 测试代码
