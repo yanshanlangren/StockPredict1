@@ -114,13 +114,17 @@ async function trainAndPredict() {
                             <div class="label">预测准确率</div>
                             <div class="value">${(data.accuracy * 100).toFixed(1)}%</div>
                         </div>
+                        <div class="stat-card ${data.total_return >= 0 ? 'positive' : 'negative'}">
+                            <div class="label">模拟收益率</div>
+                            <div class="value">${formatPercent(data.total_return)}</div>
+                        </div>
                         <div class="stat-card">
                             <div class="label">特征数量</div>
                             <div class="value">${data.features_used}</div>
                         </div>
                         <div class="stat-card">
                             <div class="label">模型类型</div>
-                            <div class="value" style="font-size: 16px;">多指标集成</div>
+                            <div class="value" style="font-size: 16px;">收益优化</div>
                         </div>
                     </div>
                 </div>
