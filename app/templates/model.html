@@ -13,7 +13,10 @@
 
     <div class="form-group">
         <label for="days">训练天数：</label>
-        <input type="number" id="days" value="30" min="20" max="100">
+        <input type="number" id="days" value="60" min="50" max="300" placeholder="建议60-180天">
+        <small style="color: #666; display: block; margin-top: 5px;">
+            💡 建议使用60-180天数据以获得更好的预测效果
+        </small>
     </div>
 
     <button class="btn btn-primary" onclick="trainAndPredict()" id="predict-btn">训练并预测</button>
@@ -79,8 +82,16 @@ async function trainAndPredict() {
 
     // 显示加载状态
     btn.disabled = true;
-    btn.textContent = '训练中...';
-    showLoading('model-result');
+    btn.textContent = '加载中...';
+    showLoading('model-result', `
+        <div style="text-align: center; padding: 20px;">
+            <div style="font-size: 24px; margin-bottom: 15px;">🔄</div>
+            <div>正在加载数据...</div>
+            <div style="color: #666; margin-top: 10px; font-size: 14px;">
+                如果数据不足，系统会自动从腾讯财经重新获取
+            </div>
+        </div>
+    `);
     document.getElementById('prediction-chart').style.display = 'none';
 
     try {
@@ -137,7 +148,25 @@ async function trainAndPredict() {
             createPredictionChart('predictionChart', data.dates, data.actual, data.predicted);
 
         } else {
-            showError('model-result', response.message);
+            // 更友好的错误提示
+            let errorMessage = response.message;
+            
+            if (errorMessage.includes('数据不足') || errorMessage.includes('数据严重不足')) {
+                errorMessage = `
+                    <div style="text-align: left;">
+                        <strong>❌ ${errorMessage}</strong><br><br>
+                        💡 <strong>建议解决方案：</strong><br>
+                        1. 增加训练天数（建议60-180天）<br>
+                        2. 选择上市时间较长的股票<br>
+                        3. 等待几分钟后重试（系统会自动重新获取数据）<br><br>
+                        <button class="btn btn-primary" onclick="trainAndPredict()" style="margin-top: 10px;">
+                            🔄 重新尝试
+                        </button>
+                    </div>
+                `;
+            }
+            
+            showError('model-result', errorMessage);
         }
 
     } catch (error) {

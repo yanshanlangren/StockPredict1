@@ -225,11 +225,54 @@ def predict_stock(stock_code):
 
         df_processed = df_processed.dropna()
 
+        # 如果数据不足，尝试重新从API获取数据
         if len(df_processed) < 50:
-            return jsonify({
-                'success': False,
-                'message': f'数据不足，计算指标后只有 {len(df_processed)} 天数据'
-            }), 400
+            logger.info(f"数据不足（{len(df_processed)}天），尝试从腾讯财经重新获取数据...")
+            df = data_manager.get_stock_kline(stock_code, days=days * 6, force_refresh=True)
+
+            if df.empty or len(df) < 60:
+                return jsonify({
+                    'success': False,
+                    'message': f'数据严重不足，腾讯财经也无法获取足够数据（当前：{len(df) if not df.empty else 0}天）。请选择其他股票或增加训练天数。'
+                }), 400
+
+            df_processed = df.copy()
+
+            # 重新计算技术指标
+            df_processed['ma5'] = df_processed['close'].rolling(5).mean()
+            df_processed['ma10'] = df_processed['close'].rolling(10).mean()
+            df_processed['ma20'] = df_processed['close'].rolling(20).mean()
+            df_processed['ma30'] = df_processed['close'].rolling(30).mean()
+
+            delta = df_processed['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            df_processed['rsi'] = 100 - (100 / (1 + rs))
+
+            ema12 = df_processed['close'].ewm(span=12, adjust=False).mean()
+            ema26 = df_processed['close'].ewm(span=26, adjust=False).mean()
+            df_processed['macd'] = ema12 - ema26
+            df_processed['macd_signal'] = df_processed['macd'].ewm(span=9, adjust=False).mean()
+
+            df_processed['bb_middle'] = df_processed['close'].rolling(20).mean()
+            bb_std = df_processed['close'].rolling(20).std()
+            df_processed['bb_upper'] = df_processed['bb_middle'] + (bb_std * 2)
+            df_processed['bb_lower'] = df_processed['bb_middle'] - (bb_std * 2)
+            df_processed['bb_position'] = (df_processed['close'] - df_processed['bb_lower']) / (df_processed['bb_upper'] - df_processed['bb_lower'])
+
+            df_processed['momentum'] = df_processed['close'].pct_change(5)
+            df_processed['momentum_3'] = df_processed['close'].pct_change(3)
+
+            df_processed = df_processed.dropna()
+
+            if len(df_processed) < 50:
+                return jsonify({
+                    'success': False,
+                    'message': f'重新获取后数据仍不足（{len(df_processed)}天）。该股票可能上市时间较短，请选择其他股票。'
+                }), 400
+
+        logger.info(f"✓ 数据充足，计算指标后共 {len(df_processed)} 天数据")
 
         # 准备数据用于训练
         features = ['close', 'ma5', 'ma10', 'ma20', 'ma30', 'rsi', 'macd', 'macd_signal', 'bb_position', 'momentum', 'momentum_3']
