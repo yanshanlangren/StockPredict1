@@ -7,15 +7,7 @@
     <div class="form-group">
         <label for="stock-code">股票代码：</label>
         <select id="stock-code">
-            <option value="">选择股票...</option>
-            <option value="600000">600000 - 浦发银行</option>
-            <option value="600004">600004 - 白云机场</option>
-            <option value="600006">600006 - 东风汽车</option>
-            <option value="600007">600007 - 中国国贸</option>
-            <option value="600008">600008 - 首创股份</option>
-            <option value="600009">600009 - 上海机场</option>
-            <option value="600010">600010 - 包钢股份</option>
-            <option value="600011">600011 - 华能国际</option>
+            <option value="">加载中...</option>
         </select>
     </div>
 
@@ -39,6 +31,35 @@
 
 {% block scripts %}
 <script>
+// 加载股票列表
+async function loadStockList() {
+    try {
+        const response = await fetch('/api/stocks');
+        const data = await response.json();
+
+        if (data.success) {
+            const select = document.getElementById('stock-code');
+            select.innerHTML = '<option value="">选择股票...</option>';
+
+            // 添加股票选项
+            data.data.forEach(stock => {
+                const option = document.createElement('option');
+                option.value = stock.code;
+                option.textContent = `${stock.code} - ${stock.name}`;
+                select.appendChild(option);
+            });
+
+            console.log(`已加载 ${data.total} 只股票`);
+        } else {
+            console.error('加载股票列表失败:', data.message);
+            document.getElementById('stock-code').innerHTML = '<option value="">加载失败</option>';
+        }
+    } catch (error) {
+        console.error('加载股票列表失败:', error);
+        document.getElementById('stock-code').innerHTML = '<option value="">加载失败</option>';
+    }
+}
+
 // 加载股票数据
 async function loadStockData() {
     const stockCode = document.getElementById('stock-code').value;
@@ -116,14 +137,21 @@ async function loadStockData() {
     }
 }
 
-// 页面加载时检查URL参数
+// 页面加载时
 document.addEventListener('DOMContentLoaded', function() {
+    // 加载股票列表
+    loadStockList();
+
+    // 检查URL参数
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
 
     if (code) {
-        document.getElementById('stock-code').value = code;
-        loadStockData();
+        // 等待股票列表加载完成后选择股票
+        setTimeout(() => {
+            document.getElementById('stock-code').value = code;
+            loadStockData();
+        }, 500);
     }
 });
 </script>

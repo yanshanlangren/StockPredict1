@@ -1,5 +1,5 @@
 """
-数据源管理器 - 支持多数据源切换
+数据源管理器 - 支持多数据源切换，优先使用本地缓存
 """
 import pandas as pd
 import logging
@@ -7,6 +7,7 @@ from typing import Optional, List
 from enum import Enum
 
 from tencent_crawler import TencentFinanceCrawler
+from data_cache import cache
 import sys
 import os
 
@@ -19,14 +20,15 @@ logger = logging.getLogger(__name__)
 
 class DataSource(Enum):
     """数据源枚举"""
-    TENCENT = "tencent"  # 腾讯财经（推荐）
-    MOCK = "mock"  # 模拟数据（兜底）
+    CACHE = "cache"      # 本地缓存（优先）
+    TENCENT = "tencent"  # 腾讯财经
+    MOCK = "mock"        # 模拟数据（兜底）
 
 
 class DataSourceManager:
-    """数据源管理器 - 自动切换数据源"""
+    """数据源管理器 - 优先使用本地缓存，其次API"""
 
-    def __init__(self, preferred_source: DataSource = DataSource.TENCENT):
+    def __init__(self, preferred_source: DataSource = DataSource.CACHE):
         """
         初始化数据源管理器
 
@@ -51,23 +53,35 @@ class DataSourceManager:
         except Exception as e:
             logger.warning(f"腾讯财经爬虫初始化失败: {e}")
 
-    def get_stock_kline(self, stock_code: str, days: int = 300, source: Optional[DataSource] = None) -> pd.DataFrame:
+    def get_stock_kline(self, stock_code: str, days: int = 300, source: Optional[DataSource] = None, force_refresh: bool = False) -> pd.DataFrame:
         """
-        获取股票K线数据（自动切换数据源）
+        获取股票K线数据（优先使用本地缓存）
 
         Args:
             stock_code: 股票代码
             days: 获取天数
             source: 指定数据源，None表示自动选择
+            force_refresh: 强制刷新（不使用缓存）
 
         Returns:
             DataFrame: 股票K线数据
         """
+        # 1. 优先检查本地缓存
+        if not force_refresh:
+            cached_df = cache.get_cached_data(stock_code)
+            if cached_df is not None and len(cached_df) >= days * 0.5:  # 至少需要一半的数据
+                logger.info(f"✓ 从本地缓存加载股票 {stock_code} 数据，共 {len(cached_df)} 天")
+                return cached_df.tail(days)  # 只返回需要的天数
+
+        # 2. 缓存无效或强制刷新，使用API获取
         if source is None:
             source = self.preferred_source
 
-        # 尝试顺序
+        # 尝试顺序：缓存（已跳过）-> 腾讯财经 -> 模拟数据
         sources_to_try = self._get_source_priority(source)
+
+        # 跳过CACHE，因为已经检查过了
+        sources_to_try = [ds for ds in sources_to_try if ds != DataSource.CACHE]
 
         last_error = None
 
@@ -81,12 +95,16 @@ class DataSourceManager:
                     df = self.tencent_crawler.get_stock_kline(tencent_code, days)
                     if not df.empty:
                         logger.info(f"✓ 使用腾讯财经成功获取数据")
+                        # 保存到本地缓存
+                        cache.save_to_cache(stock_code, df)
                         return df
 
                 elif ds == DataSource.MOCK:
                     df = self._get_mock_data(stock_code, days)
                     if not df.empty:
                         logger.info(f"✓ 使用模拟数据成功")
+                        # 模拟数据也保存到缓存
+                        cache.save_to_cache(stock_code, df)
                         return df
 
             except Exception as e:
@@ -123,8 +141,8 @@ class DataSourceManager:
         Returns:
             按优先级排序的数据源列表
         """
-        # 默认优先级：腾讯财经 > 模拟数据
-        all_sources = [DataSource.TENCENT, DataSource.MOCK]
+        # 默认优先级：缓存 > 腾讯财经 > 模拟数据
+        all_sources = [DataSource.CACHE, DataSource.TENCENT, DataSource.MOCK]
 
         # 将首选源移到最前面
         if preferred in all_sources:

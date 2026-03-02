@@ -1,0 +1,8 @@
+{
+  "input_shape": [
+    10
+  ],
+  "epochs_trained": 10,
+  "final_train_loss": 44.7060432434082,
+  "final_val_loss": 35.32905197143555
+}

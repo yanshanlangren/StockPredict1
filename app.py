@@ -94,10 +94,10 @@ def health_check():
 
 @app.route('/api/stocks')
 def get_stocks():
-    """获取股票列表"""
+    """获取股票列表（不限制数量）"""
     try:
-        limit = request.args.get('limit', 20, type=int)
-        stock_list = data_manager.get_stock_list(limit=limit)
+        # 不传limit参数，获取所有可用股票
+        stock_list = data_manager.get_stock_list()
 
         if stock_list.empty:
             return jsonify({
@@ -107,7 +107,8 @@ def get_stocks():
 
         return jsonify({
             'success': True,
-            'data': stock_list.to_dict('records')
+            'data': stock_list.to_dict('records'),
+            'total': len(stock_list)
         })
     except Exception as e:
         logger.error(f"获取股票列表失败: {e}")
@@ -219,7 +220,7 @@ def predict_stock(stock_code):
 
         # 简化训练（只训练10个epoch）
         predictor.build_lstm_model(input_shape=(sequence_length, 1))
-        predictor.train(X, y, epochs=10, batch_size=16, validation_split=0.2)
+        predictor.train(X, y, epochs=10, batch_size=16)
 
         # 预测
         split_idx = int(len(X) * 0.8)
