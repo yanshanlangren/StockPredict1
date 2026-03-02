@@ -21,10 +21,14 @@ function formatDate(dateStr) {
 }
 
 // 显示加载状态
-function showLoading(elementId) {
+function showLoading(elementId, customHtml = null) {
     const element = document.getElementById(elementId);
     if (element) {
-        element.innerHTML = '<div class="loading">加载中...</div>';
+        if (customHtml) {
+            element.innerHTML = customHtml;
+        } else {
+            element.innerHTML = '<div class="loading">加载中...</div>';
+        }
     }
 }
 

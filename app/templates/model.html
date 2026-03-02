@@ -104,48 +104,108 @@ async function trainAndPredict() {
         if (response.success) {
             const data = response.data;
 
+            // 检查是否是模拟预测模式
+            const isMockMode = response.mode === 'mock';
+
             // 显示结果
-            const resultHtml = `
-                <div class="card">
-                    <h2>📊 模型训练结果</h2>
-                    <div class="stats-grid">
-                        <div class="stat-card">
-                            <div class="label">股票代码</div>
-                            <div class="value" style="font-size: 22px;">${data.stock_code}</div>
+            let resultHtml = '';
+
+            if (isMockMode) {
+                // 模拟预测模式
+                resultHtml = `
+                    <div class="card">
+                        <h2>📊 模型预测结果（模拟模式）</h2>
+                        <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #ffc107;">
+                            <strong>⚠️ 当前运行在轻量模式</strong><br>
+                            TensorFlow未安装，使用模拟预测。如需真实预测，请安装完整版：<br>
+                            <code>pip install -r requirements_full.txt</code>
                         </div>
-                        <div class="stat-card">
-                            <div class="label">训练样本</div>
-                            <div class="value">${data.train_days}</div>
+                        <div class="stats-grid">
+                            <div class="stat-card">
+                                <div class="label">股票代码</div>
+                                <div class="value" style="font-size: 22px;">${stockCode}</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="label">数据天数</div>
+                                <div class="value">${data.days_used}</div>
+                            </div>
+                            <div class="stat-card ${data.accuracy >= 50 ? 'positive' : 'negative'}">
+                                <div class="label">模拟准确率</div>
+                                <div class="value">${data.accuracy.toFixed(1)}%</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="label">最新价格</div>
+                                <div class="value">¥${data.latest_price.toFixed(2)}</div>
+                            </div>
                         </div>
-                        <div class="stat-card">
-                            <div class="label">测试样本</div>
-                            <div class="value">${data.test_days}</div>
-                        </div>
-                        <div class="stat-card ${data.accuracy >= 0.5 ? 'positive' : 'negative'}">
-                            <div class="label">预测准确率</div>
-                            <div class="value">${(data.accuracy * 100).toFixed(1)}%</div>
-                        </div>
-                        <div class="stat-card ${data.total_return >= 0 ? 'positive' : 'negative'}">
-                            <div class="label">模拟收益率</div>
-                            <div class="value">${formatPercent(data.total_return)}</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="label">特征数量</div>
-                            <div class="value">${data.features_used}</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="label">模型类型</div>
-                            <div class="value" style="font-size: 16px;">收益优化</div>
+
+                        <div class="card" style="margin-top: 20px;">
+                            <h3>🔮 未来5天预测</h3>
+                            <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 15px;">
+                                ${data.predictions.map((pred, i) => `
+                                    <div style="text-align: center; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+                                        <div style="font-size: 12px; color: #666;">第${i+1}天</div>
+                                        <div style="font-size: 18px; font-weight: bold; margin-top: 5px;">¥${pred.toFixed(2)}</div>
+                                        <div style="font-size: 12px; color: ${pred > data.latest_price ? '#28a745' : '#dc3545'};">
+                                            ${pred > data.latest_price ? '↗' : '↘'} ${((pred - data.latest_price) / data.latest_price * 100).toFixed(1)}%
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
                         </div>
                     </div>
-                </div>
-            `;
+                `;
+            } else {
+                // 完整预测模式
+                resultHtml = `
+                    <div class="card">
+                        <h2>📊 模型训练结果</h2>
+                        <div class="stats-grid">
+                            <div class="stat-card">
+                                <div class="label">股票代码</div>
+                                <div class="value" style="font-size: 22px;">${data.stock_code}</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="label">训练样本</div>
+                                <div class="value">${data.train_days}</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="label">测试样本</div>
+                                <div class="value">${data.test_days}</div>
+                            </div>
+                            <div class="stat-card ${data.accuracy >= 0.5 ? 'positive' : 'negative'}">
+                                <div class="label">预测准确率</div>
+                                <div class="value">${(data.accuracy * 100).toFixed(1)}%</div>
+                            </div>
+                            <div class="stat-card ${data.total_return >= 0 ? 'positive' : 'negative'}">
+                                <div class="label">模拟收益率</div>
+                                <div class="value">${formatPercent(data.total_return)}</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="label">特征数量</div>
+                                <div class="value">${data.features_used}</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="label">模型类型</div>
+                                <div class="value" style="font-size: 16px;">收益优化</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
 
             document.getElementById('model-result').innerHTML = resultHtml;
 
             // 显示图表
             document.getElementById('prediction-chart').style.display = 'block';
-            createPredictionChart('predictionChart', data.dates, data.actual, data.predicted);
+
+            if (isMockMode) {
+                // 模拟预测图表
+                createMockPredictionChart('predictionChart', data.chart_data);
+            } else {
+                // 完整预测图表
+                createPredictionChart('predictionChart', data.dates, data.actual, data.predicted);
+            }
 
         } else {
             // 更友好的错误提示
@@ -175,6 +235,76 @@ async function trainAndPredict() {
         btn.disabled = false;
         btn.textContent = '训练并预测';
     }
+}
+
+// 创建模拟预测图表
+function createMockPredictionChart(canvasId, chartData) {
+    const ctx = document.getElementById(canvasId).getContext('2d');
+
+    // 准备数据
+    const dates = [];
+    const actual = [];
+    const predicted = [];
+
+    chartData.forEach(item => {
+        dates.push(item.date);
+        actual.push(item.actual);
+        predicted.push(item.predicted);
+    });
+
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: dates,
+            datasets: [
+                {
+                    label: '实际价格',
+                    data: actual,
+                    borderColor: 'rgb(75, 192, 192)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    tension: 0.1,
+                    fill: true
+                },
+                {
+                    label: '预测价格',
+                    data: predicted,
+                    borderColor: 'rgb(255, 99, 132)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                    tension: 0.1,
+                    fill: true,
+                    borderDash: [5, 5]
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'top',
+                },
+                title: {
+                    display: true,
+                    text: '股票价格预测（模拟模式）'
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: false,
+                    title: {
+                        display: true,
+                        text: '价格 (¥)'
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: '日期'
+                    }
+                }
+            }
+        }
+    });
 }
 </script>
 {% endblock %}
