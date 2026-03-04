@@ -191,6 +191,64 @@ class DataCache:
 
         return info
 
+    def get_cached_stock_list(self, cache_dir: str = "data/cache") -> Optional[pd.DataFrame]:
+        """
+        从缓存获取股票列表
+
+        Returns:
+            DataFrame或None
+        """
+        cache_file = os.path.join(cache_dir, "stock_list.csv")
+
+        if not os.path.exists(cache_file):
+            logger.debug("股票列表缓存文件不存在")
+            return None
+
+        try:
+            df = pd.read_csv(cache_file)
+
+            if df.empty:
+                return None
+
+            # 检查数据是否过期（超过30天）
+            file_time = os.path.getmtime(cache_file)
+            days_old = (datetime.now().timestamp() - file_time) / (24 * 3600)
+
+            if days_old > 30:
+                logger.info(f"股票列表缓存已过期（{days_old:.1f}天）")
+                return None
+
+            logger.info(f"从缓存加载股票列表，共 {len(df)} 只股票")
+            return df
+
+        except Exception as e:
+            logger.error(f"读取股票列表缓存失败: {e}")
+            return None
+
+    def save_stock_list_cache(self, stock_list: pd.DataFrame, cache_dir: str = "data/cache") -> bool:
+        """
+        保存股票列表到缓存
+
+        Args:
+            stock_list: 股票列表DataFrame
+            cache_dir: 缓存目录
+
+        Returns:
+            是否成功
+        """
+        if stock_list.empty:
+            return False
+
+        cache_file = os.path.join(cache_dir, "stock_list.csv")
+
+        try:
+            stock_list.to_csv(cache_file, index=False)
+            logger.info(f"已缓存股票列表，共 {len(stock_list)} 只股票")
+            return True
+        except Exception as e:
+            logger.error(f"保存股票列表缓存失败: {e}")
+            return False
+
 
 # 全局缓存实例
 cache = DataCache()

@@ -203,17 +203,28 @@ class DataSourceManager:
             logger.error(f"读取模拟数据失败: {e}")
             return pd.DataFrame()
 
-    def get_stock_list(self, limit: Optional[int] = None, source: Optional[DataSource] = None) -> pd.DataFrame:
+    def get_stock_list(self, limit: Optional[int] = None, source: Optional[DataSource] = None, force_refresh: bool = False) -> pd.DataFrame:
         """
-        获取股票列表（自动切换数据源）
+        获取股票列表（自动切换数据源，支持缓存）
 
         Args:
             limit: 返回数量限制
             source: 指定数据源，None表示自动选择
+            force_refresh: 强制刷新，不使用缓存
 
         Returns:
             DataFrame: 股票列表
         """
+        # 1. 尝试从缓存读取（如果不强制刷新）
+        if not force_refresh:
+            cached_list = cache.get_cached_stock_list()
+            if cached_list is not None and not cached_list.empty:
+                logger.info(f"✓ 从缓存加载股票列表，共 {len(cached_list)} 只股票")
+                if limit:
+                    cached_list = cached_list.head(limit)
+                return cached_list
+
+        # 2. 缓存未命中或强制刷新，从数据源获取
         if source is None:
             source = self.preferred_source
 
@@ -228,6 +239,8 @@ class DataSourceManager:
                     df = self.tencent_crawler.get_stock_list(limit=limit)
                     if not df.empty:
                         logger.info(f"✓ 使用腾讯财经成功获取股票列表")
+                        # 保存到缓存
+                        cache.save_stock_list_cache(df)
                         return df
 
                 elif ds == DataSource.MOCK:
@@ -235,6 +248,8 @@ class DataSourceManager:
                     df = self._get_mock_stock_list(limit)
                     if not df.empty:
                         logger.info(f"✓ 使用模拟数据成功获取股票列表")
+                        # 保存到缓存
+                        cache.save_stock_list_cache(df)
                         return df
 
             except Exception as e:

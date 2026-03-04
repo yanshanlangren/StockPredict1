@@ -6,9 +6,17 @@
 
     <div class="form-group">
         <label for="stock-code">股票代码：</label>
-        <select id="stock-code">
-            <option value="">加载中...</option>
-        </select>
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <input type="text" id="stock-code-input" placeholder="输入或选择股票代码（如600000）" 
+                   style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;"
+                   oninput="filterStockList()" onkeydown="if(event.key === 'Enter') loadStockData()">
+            <select id="stock-code" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <option value="">加载中...</option>
+            </select>
+        </div>
+        <small style="color: #666; display: block; margin-top: 5px;">
+            💡 可以在左侧输入框中输入股票代码进行过滤，或从右侧下拉框中选择
+        </small>
     </div>
 
     <div class="form-group">
@@ -31,6 +39,9 @@
 
 {% block scripts %}
 <script>
+// 全局变量存储股票列表
+let allStocks = [];
+
 // 加载股票列表
 async function loadStockList() {
     try {
@@ -38,17 +49,8 @@ async function loadStockList() {
         const data = await response.json();
 
         if (data.success) {
-            const select = document.getElementById('stock-code');
-            select.innerHTML = '<option value="">选择股票...</option>';
-
-            // 添加股票选项
-            data.data.forEach(stock => {
-                const option = document.createElement('option');
-                option.value = stock.code;
-                option.textContent = `${stock.code} - ${stock.name}`;
-                select.appendChild(option);
-            });
-
+            allStocks = data.data;  // 保存到全局变量
+            updateStockSelect(allStocks);
             console.log(`已加载 ${data.total} 只股票`);
         } else {
             console.error('加载股票列表失败:', data.message);
@@ -59,6 +61,52 @@ async function loadStockList() {
         document.getElementById('stock-code').innerHTML = '<option value="">加载失败</option>';
     }
 }
+
+// 更新股票选择框
+function updateStockSelect(stocks) {
+    const select = document.getElementById('stock-code');
+    select.innerHTML = '<option value="">选择股票...</option>';
+
+    // 添加股票选项
+    stocks.forEach(stock => {
+        const option = document.createElement('option');
+        option.value = stock.code;
+        option.textContent = `${stock.code} - ${stock.name}`;
+        select.appendChild(option);
+    });
+}
+
+// 过滤股票列表
+function filterStockList() {
+    const filterText = document.getElementById('stock-code-input').value.toLowerCase().trim();
+
+    if (!filterText) {
+        // 如果过滤框为空，显示所有股票
+        updateStockSelect(allStocks);
+        return;
+    }
+
+    // 过滤股票列表
+    const filteredStocks = allStocks.filter(stock => {
+        return stock.code.includes(filterText) ||
+               stock.name.toLowerCase().includes(filterText);
+    });
+
+    updateStockSelect(filteredStocks);
+
+    // 自动选择第一个匹配的股票
+    if (filteredStocks.length > 0) {
+        document.getElementById('stock-code').value = filteredStocks[0].code;
+    }
+}
+
+// 同步输入框和选择框
+document.getElementById('stock-code').addEventListener('change', function() {
+    const selectedCode = this.value;
+    if (selectedCode) {
+        document.getElementById('stock-code-input').value = selectedCode;
+    }
+});
 
 // 加载股票数据
 async function loadStockData() {

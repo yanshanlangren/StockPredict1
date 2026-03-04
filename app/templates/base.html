@@ -17,6 +17,7 @@
                 <a href="{{ url_for('stock_page') }}" class="nav-link {% if request.endpoint == 'stock_page' %}active{% endif %}">股票</a>
                 <a href="{{ url_for('model_page') }}" class="nav-link {% if request.endpoint == 'model_page' %}active{% endif %}">模型</a>
                 <a href="{{ url_for('backtest_page') }}" class="nav-link {% if request.endpoint == 'backtest_page' %}active{% endif %}">回测</a>
+                <a href="{{ url_for('recommend_page') }}" class="nav-link {% if request.endpoint == 'recommend_page' %}active{% endif %}">推荐</a>
             </nav>
         </header>
 

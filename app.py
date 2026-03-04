@@ -92,6 +92,11 @@ def backtest_page():
     """回测页面"""
     return render_template('backtest.html')
 
+@app.route('/recommend')
+def recommend_page():
+    """股票推荐页面"""
+    return render_template('recommend.html')
+
 # ==================== API路由 ====================
 
 @app.route('/api/health')
@@ -599,6 +604,149 @@ def backtest_stock(stock_code):
         return jsonify({
             'success': False,
             'message': str(e)
+        }), 500
+
+# ==================== 股票推荐模块 ====================
+
+@app.route('/api/recommend', methods=['GET', 'POST'])
+def recommend_stocks():
+    """
+    推荐短期收益率最高的股票
+
+    请求参数:
+    {
+        "top_n": 10,           # 返回前N只股票
+        "hold_days": 5,        # 建议持有天数
+        "filter_min_price": 0  # 最低价格过滤
+    }
+
+    返回:
+    {
+        "success": true,
+        "data": {
+            "recommendations": [
+                {
+                    "rank": 1,
+                    "stock_code": "600000",
+                    "stock_name": "浦发银行",
+                    "current_price": 10.5,
+                    "predicted_return": 0.15,  # 预测收益率
+                    "recommended_hold_days": 5,
+                    "confidence": 0.85
+                }
+            ],
+            "total_analyzed": 100,
+            "analysis_time": "2026-03-02 15:30:00"
+        }
+    }
+    """
+    try:
+        # 获取参数，支持 GET 和 POST 请求
+        if request.method == 'POST':
+            params = request.json if request.json else {}
+        else:
+            params = {}
+
+        top_n = int(params.get('top_n', request.args.get('top_n', 10)))
+        hold_days = int(params.get('hold_days', request.args.get('hold_days', 5)))
+        filter_min_price = float(params.get('filter_min_price', request.args.get('filter_min_price', 0)))
+
+        logger.info(f"开始分析股票推荐，返回前 {top_n} 只，建议持有 {hold_days} 天")
+
+        # 获取股票列表
+        stock_list = data_manager.get_stock_list(limit=100)  # 限制分析数量，避免过多请求
+
+        if stock_list.empty:
+            return jsonify({
+                'success': False,
+                'message': '无法获取股票列表'
+            }), 400
+
+        # 分析每只股票
+        recommendations = []
+        analyzed_count = 0
+
+        for idx, stock in stock_list.iterrows():
+            stock_code = stock['code']
+            stock_name = stock.get('name', stock_code)
+
+            try:
+                # 获取股票数据
+                df = data_manager.get_stock_kline(stock_code, days=60)
+
+                if df.empty or len(df) < 30:
+                    continue
+
+                current_price = float(df['close'].iloc[-1])
+
+                # 价格过滤
+                if current_price < filter_min_price:
+                    continue
+
+                # 模拟预测收益率（基于最近趋势）
+                recent_returns = df['close'].pct_change().tail(10).dropna()
+
+                if len(recent_returns) < 5:
+                    continue
+
+                # 计算平均收益率
+                avg_return = recent_returns.mean()
+                volatility = recent_returns.std()
+
+                # 调整收益率预测（考虑波动性）
+                adjusted_return = avg_return / (volatility + 0.01) * hold_days
+
+                # 置信度（基于数据质量）
+                confidence = min(0.95, len(df) / 100)
+
+                recommendations.append({
+                    'stock_code': stock_code,
+                    'stock_name': stock_name,
+                    'current_price': current_price,
+                    'predicted_return': adjusted_return,
+                    'recommended_hold_days': hold_days,
+                    'confidence': confidence,
+                    'avg_return': avg_return,
+                    'volatility': volatility
+                })
+
+                analyzed_count += 1
+
+                # 限制分析数量，避免超时
+                if analyzed_count >= 50:
+                    break
+
+            except Exception as e:
+                logger.warning(f"分析股票 {stock_code} 失败: {e}")
+                continue
+
+        # 按预测收益率排序
+        recommendations.sort(key=lambda x: x['predicted_return'], reverse=True)
+
+        # 取前N只
+        top_recommendations = recommendations[:top_n]
+
+        # 添加排名
+        for idx, rec in enumerate(top_recommendations, 1):
+            rec['rank'] = idx
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'recommendations': top_recommendations,
+                'total_analyzed': analyzed_count,
+                'analysis_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'mode': 'mock' if not TENSORFLOW_AVAILABLE else 'full'
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"股票推荐失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'股票推荐失败: {str(e)}'
         }), 500
 
 # ==================== 错误处理 ====================
