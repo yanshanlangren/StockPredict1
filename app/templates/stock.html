@@ -7,7 +7,7 @@
     <div class="form-group">
         <label for="stock-code">股票代码：</label>
         <div style="display: flex; gap: 10px; align-items: center;">
-            <input type="text" id="stock-code-input" placeholder="输入或选择股票代码（如600000）" 
+            <input type="text" id="stock-code-input" placeholder="输入或选择股票代码（6位数字，如600000）"
                    style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;"
                    oninput="filterStockList()" onkeydown="if(event.key === 'Enter') loadStockData()">
             <select id="stock-code" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
@@ -15,7 +15,7 @@
             </select>
         </div>
         <small style="color: #666; display: block; margin-top: 5px;">
-            💡 可以在左侧输入框中输入股票代码进行过滤，或从右侧下拉框中选择
+            💡 股票代码必须是6位数字（沪市以6开头，深市以0/3开头），如：600000、000001、300001
         </small>
     </div>
 
@@ -110,11 +110,21 @@ document.getElementById('stock-code').addEventListener('change', function() {
 
 // 加载股票数据
 async function loadStockData() {
-    const stockCode = document.getElementById('stock-code').value;
+    const stockCodeInput = document.getElementById('stock-code-input').value.trim();
+    const stockCodeSelect = document.getElementById('stock-code').value;
     const days = document.getElementById('days').value;
 
+    // 优先使用输入框的值，如果为空则使用下拉框的值
+    const stockCode = stockCodeInput || stockCodeSelect;
+
     if (!stockCode) {
-        alert('请选择股票代码');
+        alert('请选择或输入股票代码');
+        return;
+    }
+
+    // 验证股票代码格式（6位数字）
+    if (!/^\d{6}$/.test(stockCode)) {
+        alert('股票代码格式不正确，请输入6位数字（如：600000、000001）');
         return;
     }
 
