@@ -73,8 +73,9 @@ function updateStockSelect(stocks) {
     // 添加股票选项
     stocks.forEach(stock => {
         const option = document.createElement('option');
-        option.value = stock.code;
-        option.textContent = `${stock.code} - ${stock.name}`;
+        // 确保股票代码作为字符串存储
+        option.value = String(stock.code);
+        option.textContent = `${String(stock.code)} - ${stock.name}`;
         select.appendChild(option);
     });
 }

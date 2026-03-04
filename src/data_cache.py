@@ -205,7 +205,8 @@ class DataCache:
             return None
 
         try:
-            df = pd.read_csv(cache_file)
+            # 读取时指定 code 列为字符串类型，避免被转换为数字
+            df = pd.read_csv(cache_file, dtype={'code': str})
 
             if df.empty:
                 return None

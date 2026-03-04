@@ -133,6 +133,11 @@ def get_stocks():
                 'message': '获取股票列表失败'
             }), 500
 
+        # 确保 code 列为字符串类型
+        if 'code' in stock_list.columns:
+            stock_list = stock_list.copy()
+            stock_list['code'] = stock_list['code'].astype(str)
+
         return jsonify({
             'success': True,
             'data': stock_list.to_dict('records'),
