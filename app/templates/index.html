@@ -9,7 +9,16 @@
             <div class="value">✓ 正常</div>
         </div>
         <div class="stat-card">
-            <div class="label">可用股票</div>
+            <div class="label">
+                可用股票
+                <button
+                    id="refresh-stocks-btn"
+                    onclick="refreshStockList()"
+                    style="margin-left: 10px; padding: 5px 12px; font-size: 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;"
+                    title="刷新股票列表">
+                    🔄 刷新
+                </button>
+            </div>
             <div class="value" id="stock-count">-</div>
         </div>
         <div class="stat-card positive">
@@ -21,6 +30,9 @@
             <div class="value" id="system-status">-</div>
         </div>
     </div>
+
+    <!-- 刷新状态提示 -->
+    <div id="refresh-message" style="display: none; margin-top: 15px; padding: 10px; border-radius: 5px; font-size: 14px;"></div>
 </div>
 {% endblock %}
 
@@ -28,17 +40,28 @@
 <script>
 // 页面加载时获取数据
 document.addEventListener('DOMContentLoaded', async function() {
+    await loadStockData();
+    await checkSystemStatus();
+});
+
+// 加载股票数据
+async function loadStockData() {
     try {
-        // 获取股票列表
-        const response = await fetch('/api/stocks?limit=5');
+        const response = await fetch('/api/stocks');
         const data = await response.json();
 
         if (data.success) {
-            // 更新股票数量
             document.getElementById('stock-count').textContent = data.data.length + '+';
         }
+    } catch (error) {
+        console.error('加载股票数据失败:', error);
+        document.getElementById('stock-count').textContent = '✗';
+    }
+}
 
-        // 检查系统状态
+// 检查系统状态
+async function checkSystemStatus() {
+    try {
         const healthResponse = await fetch('/api/health');
         const healthData = await healthResponse.json();
 
@@ -49,12 +72,59 @@ document.addEventListener('DOMContentLoaded', async function() {
             document.getElementById('system-status').textContent = '✗ 异常';
             document.getElementById('system-status').style.color = '#dc3545';
         }
-
     } catch (error) {
-        console.error('加载数据失败:', error);
+        console.error('检查系统状态失败:', error);
         document.getElementById('system-status').textContent = '✗ 错误';
         document.getElementById('system-status').style.color = '#dc3545';
     }
-});
+}
+
+// 刷新股票列表
+async function refreshStockList() {
+    const btn = document.getElementById('refresh-stocks-btn');
+    const messageDiv = document.getElementById('refresh-message');
+
+    // 禁用按钮，显示加载状态
+    btn.disabled = true;
+    btn.textContent = '⏳ 刷新中...';
+    messageDiv.style.display = 'block';
+    messageDiv.style.background = '#e3f2fd';
+    messageDiv.style.color = '#1976d2';
+    messageDiv.textContent = '正在刷新股票列表，请稍候...';
+
+    try {
+        const response = await fetch('/api/stocks?refresh=true');
+        const data = await response.json();
+
+        if (data.success) {
+            // 更新股票数量
+            document.getElementById('stock-count').textContent = data.data.length + '+';
+
+            // 显示成功消息
+            messageDiv.style.background = '#d4edda';
+            messageDiv.style.color = '#155724';
+            messageDiv.textContent = `✓ 刷新成功！已更新 ${data.data.length} 只股票的数据`;
+
+            // 3秒后隐藏消息
+            setTimeout(() => {
+                messageDiv.style.display = 'none';
+            }, 3000);
+        } else {
+            // 显示失败消息
+            messageDiv.style.background = '#f8d7da';
+            messageDiv.style.color = '#721c24';
+            messageDiv.textContent = `✗ 刷新失败: ${data.message}`;
+        }
+    } catch (error) {
+        console.error('刷新股票列表失败:', error);
+        messageDiv.style.background = '#f8d7da';
+        messageDiv.style.color = '#721c24';
+        messageDiv.textContent = '✗ 刷新失败，请稍后重试';
+    } finally {
+        // 恢复按钮状态
+        btn.disabled = false;
+        btn.textContent = '🔄 刷新';
+    }
+}
 </script>
 {% endblock %}

@@ -117,8 +117,15 @@ def health_check():
 def get_stocks():
     """获取股票列表（不限制数量）"""
     try:
-        # 不传limit参数，获取所有可用股票
-        stock_list = data_manager.get_stock_list()
+        # 获取刷新参数
+        force_refresh = request.args.get('refresh', 'false').lower() == 'true'
+
+        # 获取股票列表（支持强制刷新）
+        if force_refresh:
+            logger.info("强制刷新股票列表...")
+            stock_list = data_manager.get_stock_list(force_refresh=True)
+        else:
+            stock_list = data_manager.get_stock_list()
 
         if stock_list.empty:
             return jsonify({
@@ -129,7 +136,8 @@ def get_stocks():
         return jsonify({
             'success': True,
             'data': stock_list.to_dict('records'),
-            'total': len(stock_list)
+            'total': len(stock_list),
+            'refreshed': force_refresh  # 返回是否刷新了
         })
     except Exception as e:
         logger.error(f"获取股票列表失败: {e}")
