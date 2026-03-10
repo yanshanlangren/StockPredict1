@@ -14,8 +14,9 @@
             <h1>📈 股票交易AI系统</h1>
             <nav class="nav">
                 <a href="{{ url_for('index') }}" class="nav-link {% if request.endpoint == 'index' %}active{% endif %}">首页</a>
+                <a href="{{ url_for('predict_page') }}" class="nav-link {% if request.endpoint == 'predict_page' %}active{% endif %}">🔮 批量预测</a>
                 <a href="{{ url_for('stock_page') }}" class="nav-link {% if request.endpoint == 'stock_page' %}active{% endif %}">股票</a>
-                <a href="{{ url_for('model_page') }}" class="nav-link {% if request.endpoint == 'model_page' %}active{% endif %}">模型预测</a>
+                <a href="{{ url_for('model_page') }}" class="nav-link {% if request.endpoint == 'model_page' %}active{% endif %}">单股预测</a>
             </nav>
         </header>
 

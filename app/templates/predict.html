@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+    <h2>🔮 批量预测 - 发现潜力股</h2>
+    
+    <!-- 模型状态提示 -->
+    <div id="model-warning" style="display: none; margin-bottom: 20px; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
+        <strong>⚠️ 全局模型未训练</strong>
+        <p style="margin: 5px 0 0 0;">请先在首页训练全局模型后再进行预测。</p>
+    </div>
+    
+    <!-- 预测配置 -->
+    <div style="margin-bottom: 20px;">
+        <h3 style="margin: 0 0 15px 0; font-size: 16px;">⚙️ 预测配置</h3>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">返回数量 (Top N)</label>
+                <input type="number" id="top-n" value="20" min="5" max="100" 
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <small style="color: #888;">展示收益率最高的N只股票</small>
+            </div>
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">最低价格 (元)</label>
+                <input type="number" id="min-price" value="0" min="0" step="0.1"
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <small style="color: #888;">过滤低价股</small>
+            </div>
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">最高价格 (元)</label>
+                <input type="number" id="max-price" value="1000" min="0" step="1"
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <small style="color: #888;">过滤高价股</small>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 预测按钮 -->
+    <button id="predict-btn" onclick="startBatchPredict()" 
+            style="width: 100%; padding: 12px; font-size: 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+        🚀 开始预测
+    </button>
+    
+    <!-- 预测进度 -->
+    <div id="predict-progress" style="display: none; margin-top: 20px; text-align: center; padding: 30px;">
+        <div style="font-size: 40px; margin-bottom: 15px;">🔄</div>
+        <div style="font-size: 18px; margin-bottom: 10px;" id="progress-message">正在分析股票...</div>
+        <div style="color: #666;">请稍候，这可能需要几秒到几分钟</div>
+    </div>
+</div>
+
+<!-- 预测结果 -->
+<div id="predict-results" style="display: none; margin-top: 20px;">
+    <div class="card">
+        <h2>📊 预测结果</h2>
+        
+        <!-- 统计信息 -->
+        <div id="result-stats" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+        </div>
+        
+        <!-- 结果表格 -->
+        <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse;">
+                <thead>
+                    <tr style="background: #f8f9fa;">
+                        <th style="padding: 12px; text-align: left; border-bottom: 2px solid #dee2e6;">排名</th>
+                        <th style="padding: 12px; text-align: left; border-bottom: 2px solid #dee2e6;">股票代码</th>
+                        <th style="padding: 12px; text-align: left; border-bottom: 2px solid #dee2e6;">股票名称</th>
+                        <th style="padding: 12px; text-align: right; border-bottom: 2px solid #dee2e6;">当前价格</th>
+                        <th style="padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6;">预测方向</th>
+                        <th style="padding: 12px; text-align: right; border-bottom: 2px solid #dee2e6;">预期收益</th>
+                        <th style="padding: 12px; text-align: right; border-bottom: 2px solid #dee2e6;">置信度</th>
+                        <th style="padding: 12px; text-align: right; border-bottom: 2px solid #dee2e6;">预测价格</th>
+                    </tr>
+                </thead>
+                <tbody id="result-table-body">
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- 操作提示 -->
+        <div style="margin-top: 20px; padding: 15px; background: #e7f3ff; border-radius: 8px; border-left: 4px solid #007bff;">
+            <strong>💡 使用提示</strong>
+            <ul style="margin: 10px 0 0 0; padding-left: 20px; color: #333;">
+                <li>预测结果基于全局模型，仅供参考，不构成投资建议</li>
+                <li>预期收益为预测5个交易日后的收益率</li>
+                <li>置信度越高表示模型越确定预测方向</li>
+                <li>建议结合其他指标综合判断</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<!-- 无结果提示 -->
+<div id="no-results" style="display: none; margin-top: 20px;" class="card">
+    <div style="text-align: center; padding: 40px;">
+        <div style="font-size: 50px; margin-bottom: 15px;">📉</div>
+        <div style="font-size: 18px; margin-bottom: 10px;">暂无符合条件的预测结果</div>
+        <div style="color: #666;">请尝试调整筛选条件或稍后再试</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 页面加载时检查模型状态
+document.addEventListener('DOMContentLoaded', async function() {
+    await checkModelStatus();
+});
+
+// 检查模型状态
+async function checkModelStatus() {
+    try {
+        const response = await fetch('/api/model/info');
+        const data = await response.json();
+        
+        if (!data.global_model_available) {
+            document.getElementById('model-warning').style.display = 'block';
+            document.getElementById('predict-btn').disabled = true;
+            document.getElementById('predict-btn').style.background = '#6c757d';
+            document.getElementById('predict-btn').textContent = '⚠️ 请先训练模型';
+        }
+    } catch (error) {
+        console.error('检查模型状态失败:', error);
+    }
+}
+
+// 开始批量预测
+async function startBatchPredict() {
+    const btn = document.getElementById('predict-btn');
+    const topN = document.getElementById('top-n').value;
+    const minPrice = document.getElementById('min-price').value;
+    const maxPrice = document.getElementById('max-price').value;
+    
+    // 禁用按钮
+    btn.disabled = true;
+    btn.textContent = '⏳ 预测中...';
+    
+    // 显示进度
+    document.getElementById('predict-progress').style.display = 'block';
+    document.getElementById('predict-results').style.display = 'none';
+    document.getElementById('no-results').style.display = 'none';
+    
+    try {
+        const response = await fetch('/api/predict/batch', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                top_n: parseInt(topN),
+                min_price: parseFloat(minPrice),
+                max_price: parseFloat(maxPrice)
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            displayResults(data.data);
+        } else {
+            throw new Error(data.message);
+        }
+    } catch (error) {
+        console.error('预测失败:', error);
+        alert('预测失败: ' + error.message);
+    } finally {
+        // 恢复按钮
+        btn.disabled = false;
+        btn.textContent = '🚀 开始预测';
+        document.getElementById('predict-progress').style.display = 'none';
+    }
+}
+
+// 显示结果
+function displayResults(data) {
+    const predictions = data.predictions;
+    const totalAnalyzed = data.total_analyzed;
+    const analysisTime = data.analysis_time;
+    
+    if (predictions.length === 0) {
+        document.getElementById('no-results').style.display = 'block';
+        return;
+    }
+    
+    // 显示结果区域
+    document.getElementById('predict-results').style.display = 'block';
+    
+    // 统计信息
+    const upCount = predictions.filter(p => p.prediction === 1).length;
+    const downCount = predictions.filter(p => p.prediction === 0).length;
+    const avgReturn = predictions.reduce((sum, p) => sum + p.expected_return, 0) / predictions.length;
+    const maxReturn = Math.max(...predictions.map(p => p.expected_return));
+    const minReturn = Math.min(...predictions.map(p => p.expected_return));
+    
+    document.getElementById('result-stats').innerHTML = `
+        <div style="text-align: center;">
+            <div style="font-size: 12px; color: #888;">分析股票数</div>
+            <div style="font-size: 24px; font-weight: 600; color: #333;">${totalAnalyzed}</div>
+        </div>
+        <div style="text-align: center;">
+            <div style="font-size: 12px; color: #888;">预测上涨</div>
+            <div style="font-size: 24px; font-weight: 600; color: #28a745;">${upCount} <span style="font-size: 14px;">只</span></div>
+        </div>
+        <div style="text-align: center;">
+            <div style="font-size: 12px; color: #888;">预测下跌</div>
+            <div style="font-size: 24px; font-weight: 600; color: #dc3545;">${downCount} <span style="font-size: 14px;">只</span></div>
+        </div>
+        <div style="text-align: center;">
+            <div style="font-size: 12px; color: #888;">平均预期收益</div>
+            <div style="font-size: 24px; font-weight: 600; color: ${avgReturn >= 0 ? '#28a745' : '#dc3545'};">
+                ${avgReturn >= 0 ? '+' : ''}${avgReturn.toFixed(2)}%
+            </div>
+        </div>
+    `;
+    
+    // 表格内容
+    const tbody = document.getElementById('result-table-body');
+    tbody.innerHTML = '';
+    
+    predictions.forEach(p => {
+        const row = document.createElement('tr');
+        row.style.cssText = 'border-bottom: 1px solid #dee2e6; hover:background: #f8f9fa;';
+        
+        // 根据预期收益设置背景色
+        let bgColor = 'transparent';
+        if (p.expected_return > 3) {
+            bgColor = '#d4edda';  // 绿色背景 - 高收益
+        } else if (p.expected_return < -1) {
+            bgColor = '#f8d7da';  // 红色背景 - 负收益
+        }
+        
+        row.innerHTML = `
+            <td style="padding: 12px;">
+                <span style="display: inline-block; width: 30px; height: 30px; line-height: 30px; text-align: center; border-radius: 50%; background: ${p.rank <= 3 ? '#ffc107' : '#e9ecef'}; font-weight: 600;">
+                    ${p.rank}
+                </span>
+            </td>
+            <td style="padding: 12px; font-weight: 500;">${p.stock_code}</td>
+            <td style="padding: 12px;">${p.stock_name}</td>
+            <td style="padding: 12px; text-align: right;">¥${p.latest_price.toFixed(2)}</td>
+            <td style="padding: 12px; text-align: center;">
+                <span style="padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 500;
+                    background: ${p.prediction === 1 ? '#d4edda' : '#f8d7da'};
+                    color: ${p.prediction === 1 ? '#155724' : '#721c24'};">
+                    ${p.prediction_text}
+                </span>
+            </td>
+            <td style="padding: 12px; text-align: right; font-weight: 600; color: ${p.expected_return >= 0 ? '#28a745' : '#dc3545'};">
+                ${p.expected_return >= 0 ? '+' : ''}${p.expected_return.toFixed(2)}%
+            </td>
+            <td style="padding: 12px; text-align: right;">
+                <div style="display: flex; align-items: center; justify-content: flex-end;">
+                    <div style="width: 60px; height: 6px; background: #e9ecef; border-radius: 3px; margin-right: 8px;">
+                        <div style="width: ${p.confidence * 100}%; height: 100%; background: ${p.confidence > 0.6 ? '#28a745' : '#ffc107'}; border-radius: 3px;"></div>
+                    </div>
+                    <span>${(p.confidence * 100).toFixed(0)}%</span>
+                </div>
+            </td>
+            <td style="padding: 12px; text-align: right;">¥${p.predicted_price.toFixed(2)}</td>
+        `;
+        
+        tbody.appendChild(row);
+    });
+}
+</script>
+{% endblock %}

@@ -99,6 +99,11 @@ def stock_page():
     """股票信息页面"""
     return render_template('stock.html')
 
+@app.route('/predict')
+def predict_page():
+    """批量预测页面"""
+    return render_template('predict.html')
+
 # ==================== API路由 ====================
 
 @app.route('/api/health')
@@ -483,6 +488,144 @@ def predict_stock(stock_code):
             
     except Exception as e:
         logger.error(f"预测失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+@app.route('/api/predict/batch', methods=['POST'])
+def predict_batch():
+    """
+    批量预测股票 - 使用全局模型预测所有股票
+    
+    请求参数:
+    {
+        "top_n": 20,       # 返回前N只股票
+        "min_price": 0,    # 最低价格过滤
+        "max_price": 1000  # 最高价格过滤
+    }
+    
+    返回:
+    {
+        "success": true,
+        "data": {
+            "predictions": [...],  # 预测结果列表
+            "total_analyzed": 100,
+            "analysis_time": "2024-03-10 15:30:00"
+        }
+    }
+    """
+    try:
+        # 检查全局模型是否可用
+        if not GLOBAL_MODEL_AVAILABLE:
+            return jsonify({
+                'success': False,
+                'message': '全局模型不可用，请先训练模型'
+            }), 400
+        
+        # 获取参数
+        params = request.json if request.json else {}
+        top_n = int(params.get('top_n', 20))
+        min_price = float(params.get('min_price', 0))
+        max_price = float(params.get('max_price', 10000))
+        
+        logger.info(f"开始批量预测，top_n={top_n}")
+        
+        # 获取股票列表
+        stock_list = data_manager.get_stock_list(limit=200)  # 限制分析数量
+        
+        if stock_list.empty:
+            return jsonify({
+                'success': False,
+                'message': '无法获取股票列表'
+            }), 400
+        
+        # 批量预测
+        predictions = []
+        analyzed_count = 0
+        
+        for idx, stock in stock_list.iterrows():
+            stock_code = str(stock['code'])
+            stock_name = stock.get('name', stock_code)
+            
+            try:
+                # 获取股票数据
+                df = data_manager.get_stock_kline(stock_code, days=100)
+                
+                if df.empty or len(df) < 80:
+                    continue
+                
+                latest_price = float(df['close'].iloc[-1])
+                
+                # 价格过滤
+                if latest_price < min_price or latest_price > max_price:
+                    continue
+                
+                # 使用全局模型预测
+                result = global_model.predict(df)
+                
+                if result['success']:
+                    predictions.append({
+                        'stock_code': stock_code,
+                        'stock_name': stock_name,
+                        'latest_price': latest_price,
+                        'prediction': result['prediction'],
+                        'prediction_text': result['prediction_text'],
+                        'probability': float(round(result['probability'], 4)),
+                        'confidence': float(round(result['confidence'], 4)),
+                        'expected_return': float(result['expected_return']),
+                        'predicted_price': float(result['predicted_price']),
+                        'predict_days': int(result['predict_days'])
+                    })
+                    
+                    analyzed_count += 1
+                
+            except Exception as e:
+                logger.warning(f"预测股票 {stock_code} 失败: {e}")
+                continue
+        
+        # 排序逻辑：
+        # 1. 预测上涨的股票优先
+        # 2. 同方向内按预期收益率排序
+        predictions.sort(key=lambda x: (-x['prediction'], x['expected_return']), reverse=False)
+        # 重新计算：上涨的在前，然后按收益降序
+        up_stocks = [p for p in predictions if p['prediction'] == 1]
+        down_stocks = [p for p in predictions if p['prediction'] == 0]
+        
+        # 上涨股票按预期收益降序
+        up_stocks.sort(key=lambda x: x['expected_return'], reverse=True)
+        # 下跌股票按预期收益升序（最不差的在前）
+        down_stocks.sort(key=lambda x: x['expected_return'], reverse=True)
+        
+        # 合并：上涨在前，下跌在后
+        sorted_predictions = up_stocks + down_stocks
+        
+        # 取前N只
+        top_predictions = sorted_predictions[:top_n]
+        
+        # 添加排名
+        for idx, pred in enumerate(top_predictions, 1):
+            pred['rank'] = idx
+        
+        logger.info(f"批量预测完成，分析 {analyzed_count} 只股票")
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'predictions': top_predictions,
+                'total_analyzed': analyzed_count,
+                'analysis_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'model_info': {
+                    'model_name': 'global_stock_model',
+                    'predict_days': 5
+                }
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"批量预测失败: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({
