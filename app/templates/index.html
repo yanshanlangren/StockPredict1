@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
+<!-- 系统概览 -->
 <div class="card">
     <h2>🎯 系统概览</h2>
     <div class="stats-grid">
@@ -30,10 +31,79 @@
             <div class="value" id="system-status">-</div>
         </div>
     </div>
-
-    <!-- 刷新状态提示 -->
-    <div id="refresh-message" style="display: none; margin-top: 15px; padding: 10px; border-radius: 5px; font-size: 14px;"></div>
 </div>
+
+<!-- 全局模型训练 -->
+<div class="card" style="margin-top: 20px;">
+    <h2>🤖 全局模型训练</h2>
+    
+    <!-- 当前模型信息 -->
+    <div id="current-model-info" style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+        <h3 style="margin: 0 0 10px 0; font-size: 16px;">📊 当前模型信息</h3>
+        <div id="model-details" style="color: #666;">加载中...</div>
+    </div>
+    
+    <!-- 训练配置 -->
+    <div id="training-config" style="margin-bottom: 20px;">
+        <h3 style="margin: 0 0 15px 0; font-size: 16px;">⚙️ 训练配置</h3>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">股票数量</label>
+                <input type="number" id="train-stocks" value="50" min="10" max="1000" 
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <small style="color: #888;">建议: 50-200</small>
+            </div>
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">历史天数</label>
+                <input type="number" id="train-days" value="200" min="100" max="500"
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <small style="color: #888;">建议: 200-300</small>
+            </div>
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">训练轮数</label>
+                <input type="number" id="train-epochs" value="50" min="10" max="200"
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <small style="color: #888;">建议: 50-100</small>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 训练按钮 -->
+    <button id="train-btn" onclick="startTraining()" 
+            style="width: 100%; padding: 12px; font-size: 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+        🚀 开始训练
+    </button>
+    
+    <!-- 训练进度 -->
+    <div id="training-progress" style="display: none; margin-top: 20px;">
+        <h3 style="margin: 0 0 10px 0; font-size: 16px;">📈 训练进度</h3>
+        <div style="background: #e9ecef; border-radius: 4px; height: 24px; overflow: hidden; margin-bottom: 10px;">
+            <div id="progress-bar" style="background: #28a745; height: 100%; width: 0%; transition: width 0.3s;"></div>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span id="progress-text" style="color: #666;">准备中...</span>
+            <span id="progress-percent" style="font-weight: 500;">0%</span>
+        </div>
+        <div id="training-log" style="margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 4px; max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px;">
+            <!-- 训练日志将在这里显示 -->
+        </div>
+    </div>
+    
+    <!-- 训练完成提示 -->
+    <div id="training-complete" style="display: none; margin-top: 20px; padding: 15px; background: #d4edda; border-radius: 8px; border-left: 4px solid #28a745;">
+        <strong>✅ 训练完成！</strong>
+        <p style="margin: 10px 0 0 0; color: #155724;">全局模型已更新，可以使用新模型进行预测。</p>
+    </div>
+    
+    <!-- 训练错误提示 -->
+    <div id="training-error" style="display: none; margin-top: 20px; padding: 15px; background: #f8d7da; border-radius: 8px; border-left: 4px solid #dc3545;">
+        <strong>❌ 训练失败</strong>
+        <p id="error-message" style="margin: 10px 0 0 0; color: #721c24;"></p>
+    </div>
+</div>
+
+<!-- 刷新状态提示 -->
+<div id="refresh-message" style="display: none; margin-top: 15px; padding: 10px; border-radius: 5px; font-size: 14px;"></div>
 {% endblock %}
 
 {% block scripts %}
@@ -42,6 +112,10 @@
 document.addEventListener('DOMContentLoaded', async function() {
     await loadStockData();
     await checkSystemStatus();
+    await loadModelInfo();
+    
+    // 如果正在训练，开始轮询状态
+    checkTrainingStatus();
 });
 
 // 加载股票数据
@@ -87,6 +161,186 @@ async function checkSystemStatus() {
         document.getElementById('system-status').textContent = '✗ 错误';
         document.getElementById('system-status').style.color = '#dc3545';
     }
+}
+
+// 加载模型信息
+async function loadModelInfo() {
+    try {
+        const response = await fetch('/api/model/info');
+        const data = await response.json();
+        
+        const modelDetailsDiv = document.getElementById('model-details');
+        
+        if (data.global_model && data.global_model.available) {
+            const info = data.global_model;
+            const stats = info.training_stats || {};
+            const metrics = info.final_metrics || {};
+            
+            modelDetailsDiv.innerHTML = `
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-top: 10px;">
+                    <div>
+                        <div style="font-size: 12px; color: #888;">训练样本数</div>
+                        <div style="font-size: 18px; font-weight: 500; color: #333;">${stats.total_samples || 0}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #888;">训练股票数</div>
+                        <div style="font-size: 18px; font-weight: 500; color: #333;">${stats.total_stocks || 0}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #888;">训练准确率</div>
+                        <div style="font-size: 18px; font-weight: 500; color: ${(metrics.accuracy * 100) >= 55 ? '#28a745' : '#dc3545'};">${(metrics.accuracy * 100 || 0).toFixed(1)}%</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #888;">验证准确率</div>
+                        <div style="font-size: 18px; font-weight: 500; color: ${(metrics.val_accuracy * 100) >= 55 ? '#28a745' : '#dc3545'};">${(metrics.val_accuracy * 100 || 0).toFixed(1)}%</div>
+                    </div>
+                </div>
+                <div style="margin-top: 10px; font-size: 12px; color: #888;">
+                    创建时间: ${info.created_at || '未知'} | 序列长度: ${info.sequence_length || 20} | 预测天数: ${info.predict_days || 5}
+                </div>
+            `;
+        } else {
+            modelDetailsDiv.innerHTML = `
+                <div style="text-align: center; color: #856404;">
+                    <p style="margin: 0;">⚠️ 尚未训练全局模型</p>
+                    <p style="margin: 5px 0 0 0; font-size: 12px;">请配置训练参数并点击"开始训练"按钮</p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('加载模型信息失败:', error);
+        document.getElementById('model-details').innerHTML = '<span style="color: #dc3545;">加载失败</span>';
+    }
+}
+
+// 开始训练
+async function startTraining() {
+    const btn = document.getElementById('train-btn');
+    const stocks = document.getElementById('train-stocks').value;
+    const days = document.getElementById('train-days').value;
+    const epochs = document.getElementById('train-epochs').value;
+    
+    // 禁用按钮
+    btn.disabled = true;
+    btn.textContent = '⏳ 训练中...';
+    
+    // 显示进度区域
+    document.getElementById('training-progress').style.display = 'block';
+    document.getElementById('training-complete').style.display = 'none';
+    document.getElementById('training-error').style.display = 'none';
+    document.getElementById('training-config').style.opacity = '0.5';
+    document.getElementById('training-config').style.pointerEvents = 'none';
+    
+    try {
+        const response = await fetch('/api/model/train', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                stocks: parseInt(stocks),
+                days: parseInt(days),
+                epochs: parseInt(epochs)
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // 开始轮询训练状态
+            pollTrainingStatus();
+        } else {
+            throw new Error(data.message);
+        }
+    } catch (error) {
+        console.error('启动训练失败:', error);
+        showTrainingError(error.message);
+    }
+}
+
+// 轮询训练状态
+let statusInterval = null;
+
+function pollTrainingStatus() {
+    if (statusInterval) {
+        clearInterval(statusInterval);
+    }
+    
+    statusInterval = setInterval(async () => {
+        await checkTrainingStatus();
+    }, 2000);  // 每2秒检查一次
+}
+
+// 检查训练状态
+async function checkTrainingStatus() {
+    try {
+        const response = await fetch('/api/model/train/status');
+        const data = await response.json();
+        
+        if (data.success) {
+            const status = data.status;
+            
+            // 更新进度条
+            document.getElementById('progress-bar').style.width = status.progress + '%';
+            document.getElementById('progress-percent').textContent = status.progress + '%';
+            document.getElementById('progress-text').textContent = status.message;
+            
+            // 添加日志
+            if (status.message && status.is_training) {
+                const logDiv = document.getElementById('training-log');
+                const logEntry = document.createElement('div');
+                logEntry.style.cssText = 'padding: 2px 0; border-bottom: 1px solid #eee;';
+                logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${status.message}`;
+                logDiv.appendChild(logEntry);
+                logDiv.scrollTop = logDiv.scrollHeight;
+            }
+            
+            // 训练完成
+            if (!status.is_training) {
+                if (status.error) {
+                    showTrainingError(status.error);
+                } else if (status.progress === 100) {
+                    showTrainingComplete();
+                }
+                
+                // 停止轮询
+                if (statusInterval) {
+                    clearInterval(statusInterval);
+                    statusInterval = null;
+                }
+            }
+        }
+    } catch (error) {
+        console.error('检查训练状态失败:', error);
+    }
+}
+
+// 显示训练完成
+function showTrainingComplete() {
+    const btn = document.getElementById('train-btn');
+    btn.disabled = false;
+    btn.textContent = '🚀 重新训练';
+    btn.style.background = '#007bff';
+    
+    document.getElementById('training-complete').style.display = 'block';
+    document.getElementById('training-config').style.opacity = '1';
+    document.getElementById('training-config').style.pointerEvents = 'auto';
+    
+    // 重新加载模型信息
+    loadModelInfo();
+    checkSystemStatus();
+}
+
+// 显示训练错误
+function showTrainingError(message) {
+    const btn = document.getElementById('train-btn');
+    btn.disabled = false;
+    btn.textContent = '🚀 重新训练';
+    
+    document.getElementById('training-error').style.display = 'block';
+    document.getElementById('error-message').textContent = message;
+    document.getElementById('training-config').style.opacity = '1';
+    document.getElementById('training-config').style.pointerEvents = 'auto';
 }
 
 // 刷新股票列表

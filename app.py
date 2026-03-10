@@ -4,12 +4,15 @@
 股票交易AI系统 - Flask Web应用（全局模型版）
 
 功能：
-1. 全局模型预测
-2. 股票数据查询
-3. 模型信息展示
+1. 全局模型训练
+2. 全局模型预测
+3. 股票数据查询
+4. 模型信息展示
 """
 import sys
 import os
+import threading
+import subprocess
 from flask import Flask, render_template, jsonify, request
 import pandas as pd
 import json
@@ -46,6 +49,17 @@ app = Flask(__name__,
 
 # 初始化组件
 data_manager = None
+
+# 训练状态管理
+training_status = {
+    'is_training': False,
+    'progress': 0,
+    'message': '',
+    'start_time': None,
+    'end_time': None,
+    'error': None
+}
+training_lock = threading.Lock()
 
 def init_components():
     """初始化系统组件"""
@@ -123,6 +137,163 @@ def get_model_info():
             result['global_model_error'] = str(e)
     
     return jsonify(result)
+
+@app.route('/api/model/train', methods=['POST'])
+def train_model():
+    """
+    启动全局模型训练
+    
+    请求参数:
+    {
+        "stocks": 50,    # 训练使用的股票数量
+        "days": 200,     # 每只股票的历史天数
+        "epochs": 50     # 训练轮数
+    }
+    """
+    global training_status, GLOBAL_MODEL_AVAILABLE, global_model
+    
+    with training_lock:
+        # 检查是否正在训练
+        if training_status['is_training']:
+            return jsonify({
+                'success': False,
+                'message': '模型正在训练中，请稍候...'
+            }), 400
+        
+        # 获取参数
+        params = request.json if request.json else {}
+        stocks = params.get('stocks', 50)
+        days = params.get('days', 200)
+        epochs = params.get('epochs', 50)
+        
+        # 初始化训练状态
+        training_status = {
+            'is_training': True,
+            'progress': 0,
+            'message': '初始化训练环境...',
+            'start_time': datetime.now().isoformat(),
+            'end_time': None,
+            'error': None,
+            'params': {
+                'stocks': stocks,
+                'days': days,
+                'epochs': epochs
+            }
+        }
+    
+    # 启动后台训练线程
+    def run_training():
+        global training_status, GLOBAL_MODEL_AVAILABLE, global_model
+        
+        try:
+            # 更新状态：收集数据
+            with training_lock:
+                training_status['progress'] = 10
+                training_status['message'] = f'正在收集 {stocks} 只股票的数据...'
+            
+            # 构建训练命令
+            cmd = [
+                sys.executable,  # python
+                'train_global_model.py',
+                '--stocks', str(stocks),
+                '--days', str(days),
+                '--epochs', str(epochs)
+            ]
+            
+            logger.info(f"启动训练: {' '.join(cmd)}")
+            
+            # 运行训练脚本
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                cwd=os.path.dirname(os.path.abspath(__file__)) or '.'
+            )
+            
+            # 读取输出并更新进度
+            for line in process.stdout:
+                line = line.strip()
+                logger.info(f"[训练] {line}")
+                
+                # 根据输出更新进度
+                if '收集股票数据' in line or '获取股票' in line:
+                    with training_lock:
+                        training_status['progress'] = 20
+                        training_status['message'] = '正在收集股票数据...'
+                elif '计算特征' in line:
+                    with training_lock:
+                        training_status['progress'] = 40
+                        training_status['message'] = '正在计算特征...'
+                elif '训练模型' in line or 'Epoch' in line:
+                    with training_lock:
+                        training_status['progress'] = 60
+                        training_status['message'] = '正在训练模型...'
+                elif '保存模型' in line:
+                    with training_lock:
+                        training_status['progress'] = 90
+                        training_status['message'] = '正在保存模型...'
+                elif '训练完成' in line or '模型已保存' in line:
+                    with training_lock:
+                        training_status['progress'] = 95
+                        training_status['message'] = '训练完成，正在加载模型...'
+            
+            # 等待进程结束
+            return_code = process.wait()
+            
+            if return_code == 0:
+                # 训练成功，重新加载模型
+                with training_lock:
+                    training_status['progress'] = 100
+                    training_status['message'] = '训练完成！'
+                    training_status['end_time'] = datetime.now().isoformat()
+                    training_status['is_training'] = False
+                
+                # 重新加载模型
+                try:
+                    from src.global_model import get_global_model
+                    global_model = get_global_model()
+                    global_model.load_model()
+                    GLOBAL_MODEL_AVAILABLE = global_model.is_available()
+                    logger.info("✓ 模型重新加载成功")
+                except Exception as e:
+                    logger.error(f"模型重新加载失败: {e}")
+            else:
+                raise Exception(f"训练脚本返回错误码: {return_code}")
+                
+        except Exception as e:
+            logger.error(f"训练失败: {e}")
+            with training_lock:
+                training_status['is_training'] = False
+                training_status['error'] = str(e)
+                training_status['message'] = f'训练失败: {str(e)}'
+                training_status['end_time'] = datetime.now().isoformat()
+    
+    # 启动训练线程
+    thread = threading.Thread(target=run_training)
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({
+        'success': True,
+        'message': '训练已启动，请通过 /api/model/train/status 查看进度',
+        'params': {
+            'stocks': stocks,
+            'days': days,
+            'epochs': epochs
+        }
+    })
+
+@app.route('/api/model/train/status')
+def get_train_status():
+    """获取训练状态"""
+    with training_lock:
+        status = training_status.copy()
+    
+    return jsonify({
+        'success': True,
+        'status': status
+    })
 
 @app.route('/api/stocks')
 def get_stocks():
