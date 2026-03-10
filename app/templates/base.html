@@ -15,9 +15,7 @@
             <nav class="nav">
                 <a href="{{ url_for('index') }}" class="nav-link {% if request.endpoint == 'index' %}active{% endif %}">首页</a>
                 <a href="{{ url_for('stock_page') }}" class="nav-link {% if request.endpoint == 'stock_page' %}active{% endif %}">股票</a>
-                <a href="{{ url_for('model_page') }}" class="nav-link {% if request.endpoint == 'model_page' %}active{% endif %}">模型</a>
-                <a href="{{ url_for('backtest_page') }}" class="nav-link {% if request.endpoint == 'backtest_page' %}active{% endif %}">回测</a>
-                <a href="{{ url_for('recommend_page') }}" class="nav-link {% if request.endpoint == 'recommend_page' %}active{% endif %}">推荐</a>
+                <a href="{{ url_for('model_page') }}" class="nav-link {% if request.endpoint == 'model_page' %}active{% endif %}">模型预测</a>
             </nav>
         </header>
 
@@ -28,7 +26,7 @@
 
         <!-- 页脚 -->
         <footer class="footer">
-            <p>© 2026 股票交易AI系统 | 基于深度学习 | 使用腾讯财经数据</p>
+            <p>© 2026 股票交易AI系统 | 基于全局模型预测 | 使用腾讯财经数据</p>
         </footer>
     </div>
 

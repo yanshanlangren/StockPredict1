@@ -21,9 +21,9 @@
             </div>
             <div class="value" id="stock-count">-</div>
         </div>
-        <div class="stat-card positive">
-            <div class="label">模型状态</div>
-            <div class="value">✓ 就绪</div>
+        <div class="stat-card" id="model-status-card">
+            <div class="label">全局模型状态</div>
+            <div class="value" id="model-status">-</div>
         </div>
         <div class="stat-card">
             <div class="label">系统状态</div>
@@ -68,6 +68,16 @@ async function checkSystemStatus() {
         if (healthData.status === 'ok') {
             document.getElementById('system-status').textContent = '✓ 运行中';
             document.getElementById('system-status').style.color = '#28a745';
+            
+            // 更新全局模型状态
+            if (healthData.global_model && healthData.global_model.available) {
+                document.getElementById('model-status').textContent = '✓ 已加载';
+                document.getElementById('model-status').style.color = '#28a745';
+                document.getElementById('model-status-card').classList.add('positive');
+            } else {
+                document.getElementById('model-status').textContent = '未训练';
+                document.getElementById('model-status').style.color = '#ffc107';
+            }
         } else {
             document.getElementById('system-status').textContent = '✗ 异常';
             document.getElementById('system-status').style.color = '#dc3545';
