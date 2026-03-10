@@ -29,6 +29,20 @@ except ImportError:
     logger.warning("⚠️  TensorFlow未安装（需要Python 3.8+），将使用模拟预测")
     logger.warning("提示: 安装完整版请运行: pip install -r requirements_full.txt")
 
+# 尝试导入全局模型
+GLOBAL_MODEL_AVAILABLE = False
+try:
+    from src.global_model import get_global_model
+    global_model = get_global_model()
+    GLOBAL_MODEL_AVAILABLE = global_model.is_available()
+    if GLOBAL_MODEL_AVAILABLE:
+        logger.info("✓ 全局模型已加载")
+    else:
+        logger.info("ℹ️  全局模型未找到，使用单股票模型或模拟预测")
+        logger.info("提示: 训练全局模型请运行: python train_global_model.py")
+except Exception as e:
+    logger.warning(f"全局模型加载失败: {e}")
+
 # 创建Flask应用
 app = Flask(__name__,
             template_folder='app/templates',
@@ -102,16 +116,43 @@ def recommend_page():
 @app.route('/api/health')
 def health_check():
     """健康检查"""
+    # 获取全局模型信息
+    global_model_info = {}
+    if GLOBAL_MODEL_AVAILABLE:
+        try:
+            global_model_info = global_model.get_model_info()
+        except:
+            pass
+    
     return jsonify({
         'status': 'ok',
         'timestamp': datetime.now().isoformat(),
         'components': {
             'data_manager': data_manager is not None,
             'predictor': predictor is not None,
-            'tensorflow': TENSORFLOW_AVAILABLE
+            'tensorflow': TENSORFLOW_AVAILABLE,
+            'global_model': GLOBAL_MODEL_AVAILABLE
         },
-        'mode': 'full' if TENSORFLOW_AVAILABLE else 'lightweight'
+        'mode': 'full' if TENSORFLOW_AVAILABLE else 'lightweight',
+        'global_model': global_model_info if global_model_info else None
     })
+
+@app.route('/api/model/info')
+def get_model_info():
+    """获取模型信息"""
+    result = {
+        'global_model_available': GLOBAL_MODEL_AVAILABLE,
+        'tensorflow_available': TENSORFLOW_AVAILABLE
+    }
+    
+    if GLOBAL_MODEL_AVAILABLE:
+        try:
+            model_info = global_model.get_model_info()
+            result['global_model'] = model_info
+        except Exception as e:
+            result['global_model_error'] = str(e)
+    
+    return jsonify(result)
 
 @app.route('/api/stocks')
 def get_stocks():
@@ -212,9 +253,61 @@ def get_stock_info(stock_code):
 
 @app.route('/api/predict/<stock_code>', methods=['POST'])
 def predict_stock(stock_code):
-    """预测股票价格趋势 - 优化版本，追求正收益"""
+    """预测股票价格趋势 - 支持全局模型和单股票模型"""
     try:
-        # 如果TensorFlow不可用，使用模拟预测
+        days = request.json.get('days', 30) if request.json else 30
+        
+        # 优先使用全局模型
+        if GLOBAL_MODEL_AVAILABLE:
+            logger.info(f"使用全局模型预测股票 {stock_code}")
+            
+            # 获取足够的历史数据（至少80天）
+            df = data_manager.get_stock_kline(stock_code, days=max(days, 100))
+            
+            if df.empty or len(df) < 80:
+                # 数据不足，尝试重新获取
+                logger.info(f"数据不足，尝试重新获取...")
+                df = data_manager.get_stock_kline(stock_code, days=days * 4, force_refresh=True)
+            
+            if df.empty or len(df) < 80:
+                return jsonify({
+                    'success': False,
+                    'message': f'数据不足，全局模型至少需要 80 天数据（当前：{len(df) if not df.empty else 0}天）'
+                }), 400
+            
+            # 使用全局模型预测
+            result = global_model.predict(df)
+            
+            if result['success']:
+                # 获取模型信息
+                model_info = result.get('model_info', {})
+                training_stats = model_info.get('training_stats', {})
+                
+                # 构建响应（确保所有值都是可JSON序列化的类型）
+                return jsonify({
+                    'success': True,
+                    'mode': 'global_model',
+                    'data': {
+                        'stock_code': stock_code,
+                        'prediction': result['prediction'],
+                        'prediction_text': result['prediction_text'],
+                        'probability': float(round(result['probability'], 4)),
+                        'confidence': float(round(result['confidence'], 4)),
+                        'latest_price': float(result['latest_price']),
+                        'predicted_price': float(result['predicted_price']),
+                        'expected_return': float(result['expected_return']),
+                        'predict_days': int(result['predict_days']),
+                        'days_used': int(len(df)),
+                        'model_type': 'global',
+                        'model_created': str(model_info.get('created_at', 'unknown')),
+                        'training_samples': int(training_stats.get('total_samples', 0)) if training_stats else 0
+                    }
+                })
+            else:
+                # 全局模型预测失败，尝试单股票模型
+                logger.warning(f"全局模型预测失败: {result.get('message')}，尝试单股票模型")
+        
+        # 如果全局模型不可用，使用单股票模型或模拟预测
         if not TENSORFLOW_AVAILABLE:
             logger.warning("TensorFlow不可用，使用模拟预测")
             return _mock_prediction(stock_code, request)
