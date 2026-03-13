@@ -368,14 +368,24 @@ class MultiModalPredictor:
         try:
             close = df['close']
             
+            # 辅助函数：安全获取值，避免NaN
+            def safe_get(val, default=0.0):
+                try:
+                    f = float(val)
+                    return f if not (np.isnan(f) or np.isinf(f)) else default
+                except:
+                    return default
+            
             # 收益率
-            features[0] = (close.iloc[-1] / close.iloc[-5] - 1) * 100
-            features[1] = (close.iloc[-1] / close.iloc[-20] - 1) * 100
+            features[0] = safe_get((close.iloc[-1] / close.iloc[-5] - 1) * 100)
+            features[1] = safe_get((close.iloc[-1] / close.iloc[-20] - 1) * 100)
             
             # 波动率
             returns = close.pct_change()
-            features[2] = returns.tail(5).std() * 100
-            features[3] = returns.tail(20).std() * 100
+            std5 = returns.tail(5).std()
+            std20 = returns.tail(20).std()
+            features[2] = safe_get(std5 * 100) if not np.isnan(std5) else 0
+            features[3] = safe_get(std20 * 100) if not np.isnan(std20) else 0
             
             # RSI
             delta = close.diff()
@@ -383,43 +393,54 @@ class MultiModalPredictor:
             loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
             rs = gain / (loss + 1e-10)
             rsi = 100 - (100 / (1 + rs))
-            features[4] = rsi.iloc[-1] / 100
+            rsi_val = rsi.iloc[-1]
+            features[4] = safe_get(rsi_val / 100) if not np.isnan(rsi_val) else 0.5
             
             # MACD
             ema12 = close.ewm(span=12, adjust=False).mean()
             ema26 = close.ewm(span=26, adjust=False).mean()
             macd = ema12 - ema26
-            features[5] = macd.iloc[-1] / close.iloc[-1] * 100
+            macd_val = macd.iloc[-1]
+            features[5] = safe_get(macd_val / close.iloc[-1] * 100)
             
             # 布林带位置
             ma20 = close.rolling(20).mean()
-            std20 = close.rolling(20).std()
-            upper = ma20 + 2 * std20
-            lower = ma20 - 2 * std20
+            std20_bb = close.rolling(20).std()
+            upper = ma20 + 2 * std20_bb
+            lower = ma20 - 2 * std20_bb
             bb_position = (close.iloc[-1] - lower.iloc[-1]) / (upper.iloc[-1] - lower.iloc[-1] + 1e-10)
-            features[6] = bb_position
+            features[6] = safe_get(bb_position, 0.5)
             
             # 成交量比率
             volume = df['volume']
-            volume_ratio = volume.iloc[-1] / volume.tail(20).mean()
-            features[7] = min(volume_ratio / 5, 1)
+            vol_mean = volume.tail(20).mean()
+            if vol_mean > 0:
+                volume_ratio = volume.iloc[-1] / vol_mean
+                features[7] = min(safe_get(volume_ratio / 5, 0.2), 1)
             
-            # 价格位置
-            rolling_high = close.rolling(60).max()
-            rolling_low = close.rolling(60).min()
-            price_position = (close.iloc[-1] - rolling_low.iloc[-1]) / (rolling_high.iloc[-1] - rolling_low.iloc[-1] + 1e-10)
-            features[8] = price_position
+            # 价格位置（使用可用数据范围）
+            lookback = min(60, len(close))
+            rolling_high = close.rolling(lookback).max()
+            rolling_low = close.rolling(lookback).min()
+            high_val = rolling_high.iloc[-1]
+            low_val = rolling_low.iloc[-1]
+            if high_val > low_val:
+                price_position = (close.iloc[-1] - low_val) / (high_val - low_val)
+                features[8] = safe_get(price_position, 0.5)
+            else:
+                features[8] = 0.5
             
             # 均线趋势
             ma5 = close.rolling(5).mean()
             ma10 = close.rolling(10).mean()
-            ma20 = close.rolling(20).mean()
-            features[9] = 1 if ma5.iloc[-1] > ma10.iloc[-1] > ma20.iloc[-1] else -1
-            features[10] = (ma5.iloc[-1] - ma20.iloc[-1]) / ma20.iloc[-1] * 100
+            ma20_val = close.rolling(20).mean()
+            if len(df) >= 20:
+                features[9] = 1 if ma5.iloc[-1] > ma10.iloc[-1] > ma20_val.iloc[-1] else -1
+                features[10] = safe_get((ma5.iloc[-1] - ma20_val.iloc[-1]) / ma20_val.iloc[-1] * 100)
             
             # 动量
             momentum = close.pct_change(10).iloc[-1] * 100
-            features[11] = momentum
+            features[11] = safe_get(momentum)
             
         except Exception as e:
             logger.warning(f"计算技术指标失败: {e}")
@@ -472,6 +493,11 @@ class MultiModalPredictor:
                 relevance_features
             )
 
+        # 确保 prob 是有效数值
+        if np.isnan(prob) or np.isinf(prob):
+            prob = 0.5  # 默认中性概率
+        
+        prob = float(prob)
         prediction = 1 if prob > 0.5 else 0
         confidence = prob if prediction == 1 else 1 - prob
         
@@ -479,8 +505,8 @@ class MultiModalPredictor:
             'success': True,
             'prediction': int(prediction),
             'prediction_text': '上涨' if prediction == 1 else '下跌',
-            'probability': float(prob),
-            'confidence': float(confidence),
+            'probability': round(prob, 4),
+            'confidence': round(float(confidence), 4),
             'model_type': 'multimodal',
             'features_used': {
                 'news': bool(np.any(news_features)),
@@ -496,26 +522,33 @@ class MultiModalPredictor:
                         relevance_features: np.ndarray) -> float:
         """简化版预测（加权融合）"""
         # 新闻情感权重
-        news_score = news_features[0, 0] * 0.5 + news_features[0, 6] * 0.5
+        news_score = float(news_features[0, 0]) * 0.5 + float(news_features[0, 6]) * 0.5
         
         # 领域影响权重
-        sector_score = np.mean(sector_features)
+        sector_mean = np.mean(sector_features)
+        sector_score = float(sector_mean) if not np.isnan(sector_mean) else 0.0
         
         # 技术指标权重
         tech_score = 0.5
-        if tech_features[0, 9] > 0:  # 均线多头排列
-            tech_score += 0.2
-        if 0.3 < tech_features[0, 4] < 0.7:  # RSI中性
-            tech_score += 0.1
-        if tech_features[0, 6] < 0.8:  # 未超买
-            tech_score += 0.1
-        if tech_features[0, 0] > 0:  # 近期上涨
-            tech_score += 0.1
+        try:
+            if float(tech_features[0, 9]) > 0:  # 均线多头排列
+                tech_score += 0.2
+            if 0.3 < float(tech_features[0, 4]) < 0.7:  # RSI中性
+                tech_score += 0.1
+            if float(tech_features[0, 6]) < 0.8:  # 未超买
+                tech_score += 0.1
+            if float(tech_features[0, 0]) > 0:  # 近期上涨
+                tech_score += 0.1
+        except (IndexError, ValueError):
+            pass
         
         # 相关性权重
         relevance_score = 0.5
-        if relevance_features[0, 0] > 0.5:
-            relevance_score += 0.2
+        try:
+            if float(relevance_features[0, 0]) > 0.5:
+                relevance_score += 0.2
+        except (IndexError, ValueError):
+            pass
         
         # 加权融合：新闻30%，领域20%，技术指标40%，相关性10%
         combined = (
@@ -524,6 +557,10 @@ class MultiModalPredictor:
             tech_score * 0.4 +
             relevance_score * 0.1
         )
+        
+        # 确保 combined 是有效数值
+        if np.isnan(combined) or np.isinf(combined):
+            combined = 0.0
         
         # 归一化
         prob = 1 / (1 + np.exp(-combined * 5))
@@ -574,28 +611,50 @@ class MultiModalPredictor:
         )
 
         # 添加详细信息
-        latest_price = float(kline_df['close'].iloc[-1]) if not kline_df.empty else 0
+        latest_price = float(kline_df['close'].iloc[-1]) if not kline_df.empty else 0.0
+        
+        # 安全获取特征值
+        def safe_float(val, default=0.0):
+            try:
+                f = float(val)
+                return f if not (np.isnan(f) or np.isinf(f)) else default
+            except:
+                return default
+        
+        news_sentiment = safe_float(news_features[0, 0])
+        news_weighted = safe_float(news_features[0, 6])
+        tech_trend_val = safe_float(tech_features[0, 9])
+        rsi_val = safe_float(tech_features[0, 4])
+        
+        # 计算领域影响平均值
+        sector_mean = 0.0
+        if sector_impact:
+            values = [safe_float(v) for v in sector_impact.values()]
+            valid_values = [v for v in values if v != 0.0]
+            if valid_values:
+                sector_mean = np.mean(valid_values)
         
         prediction.update({
             'stock_code': stock_code,
-            'latest_price': latest_price,
+            'latest_price': round(latest_price, 2),
             'news_count': len(news_list),
             'analysis_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'feature_summary': {
-                'news_sentiment': float(news_features[0, 0]),
-                'news_weighted_sentiment': float(news_features[0, 6]),
-                'sector_impact': float(np.mean(list(sector_impact.values())) if sector_impact else 0),
-                'tech_trend': 'up' if tech_features[0, 9] > 0 else 'down',
-                'rsi': float(tech_features[0, 4])
+                'news_sentiment': round(news_sentiment, 4),
+                'news_weighted_sentiment': round(news_weighted, 4),
+                'sector_impact': round(float(sector_mean), 4),
+                'tech_trend': 'up' if tech_trend_val > 0 else 'down',
+                'rsi': round(rsi_val, 4)
             }
         })
 
         # 计算预期收益
+        confidence = prediction['confidence']
         if prediction['prediction'] == 1:
-            expected_return = prediction['confidence'] * 3
+            expected_return = confidence * 3
             predicted_price = latest_price * (1 + expected_return / 100)
         else:
-            expected_return = -prediction['confidence'] * 2
+            expected_return = -confidence * 2
             predicted_price = latest_price * (1 + expected_return / 100)
 
         prediction['expected_return'] = round(expected_return, 2)
