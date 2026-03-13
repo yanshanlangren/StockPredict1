@@ -17,6 +17,7 @@
                 <a href="{{ url_for('stock_page') }}" class="nav-link {% if request.endpoint == 'stock_page' %}active{% endif %}">单股信息</a>
                 <a href="{{ url_for('model_page') }}" class="nav-link {% if request.endpoint == 'model_page' %}active{% endif %}">单股预测</a>
                 <a href="{{ url_for('predict_page') }}" class="nav-link {% if request.endpoint == 'predict_page' %}active{% endif %}">批量预测</a>
+                <a href="{{ url_for('multimodal_page') }}" class="nav-link {% if request.endpoint == 'multimodal_page' %}active{% endif %}">🤖 多模态预测</a>
                 <a href="{{ url_for('news_page') }}" class="nav-link {% if request.endpoint == 'news_page' %}active{% endif %}">📰 新闻</a>
                 <a href="{{ url_for('company_page') }}" class="nav-link {% if request.endpoint == 'company_page' %}active{% endif %}">🏢 公司</a>
                 <a href="{{ url_for('news_impact_page') }}" class="nav-link {% if request.endpoint == 'news_impact_page' %}active{% endif %}">📊 影响分析</a>

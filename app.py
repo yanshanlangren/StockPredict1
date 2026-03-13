@@ -105,6 +105,11 @@ def predict_page():
     """批量预测页面"""
     return render_template('predict.html')
 
+@app.route('/multimodal')
+def multimodal_page():
+    """多模态预测页面"""
+    return render_template('multimodal.html')
+
 # ==================== API路由 ====================
 
 @app.route('/api/health')
