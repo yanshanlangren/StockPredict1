@@ -22,7 +22,6 @@ class DataSource(Enum):
     """数据源枚举"""
     CACHE = "cache"      # 本地缓存（优先）
     TENCENT = "tencent"  # 腾讯财经
-    MOCK = "mock"        # 模拟数据（兜底）
 
 
 class DataSourceManager:
@@ -37,7 +36,6 @@ class DataSourceManager:
         """
         self.preferred_source = preferred_source
         self.tencent_crawler = None
-        self.mock_data_path = "data/raw/mock_stock_data.csv"
 
         # 延迟初始化爬虫
         self._init_crawlers()
@@ -77,7 +75,7 @@ class DataSourceManager:
         if source is None:
             source = self.preferred_source
 
-        # 尝试顺序：缓存（已跳过）-> 腾讯财经 -> 模拟数据
+        # 尝试顺序：缓存（已跳过）-> 腾讯财经
         sources_to_try = self._get_source_priority(source)
 
         # 跳过CACHE，因为已经检查过了
@@ -96,14 +94,6 @@ class DataSourceManager:
                     if not df.empty:
                         logger.info(f"✓ 使用腾讯财经成功获取数据")
                         # 保存到本地缓存
-                        cache.save_to_cache(stock_code, df)
-                        return df
-
-                elif ds == DataSource.MOCK:
-                    df = self._get_mock_data(stock_code, days)
-                    if not df.empty:
-                        logger.info(f"✓ 使用模拟数据成功")
-                        # 模拟数据也保存到缓存
                         cache.save_to_cache(stock_code, df)
                         return df
 
@@ -141,8 +131,8 @@ class DataSourceManager:
         Returns:
             按优先级排序的数据源列表
         """
-        # 默认优先级：缓存 > 腾讯财经 > 模拟数据
-        all_sources = [DataSource.CACHE, DataSource.TENCENT, DataSource.MOCK]
+        # 默认优先级：缓存 > 腾讯财经
+        all_sources = [DataSource.CACHE, DataSource.TENCENT]
 
         # 将首选源移到最前面
         if preferred in all_sources:
@@ -150,58 +140,6 @@ class DataSourceManager:
         all_sources.insert(0, preferred)
 
         return all_sources
-
-    def _get_mock_data(self, stock_code: str, days: int) -> pd.DataFrame:
-        """
-        从模拟数据文件中获取数据
-
-        Args:
-            stock_code: 股票代码
-            days: 获取天数
-
-        Returns:
-            DataFrame: 模拟数据
-        """
-        try:
-            import os
-
-            if not os.path.exists(self.mock_data_path):
-                logger.warning(f"模拟数据文件不存在: {self.mock_data_path}")
-                return pd.DataFrame()
-
-            # 读取模拟数据
-            df = pd.read_csv(self.mock_data_path, index_col=0, parse_dates=True)
-
-            # 筛选指定股票
-            if 'code' in df.columns:
-                stock_df = df[df['code'] == stock_code].copy()
-            else:
-                logger.warning("模拟数据缺少code列")
-                return pd.DataFrame()
-
-            if stock_df.empty:
-                logger.warning(f"模拟数据中未找到股票 {stock_code}")
-                return pd.DataFrame()
-
-            # 只保留需要的列
-            required_columns = ['open', 'high', 'low', 'close', 'volume']
-            available_columns = [col for col in required_columns if col in stock_df.columns]
-
-            if not available_columns:
-                logger.warning("模拟数据缺少必要的列")
-                return pd.DataFrame()
-
-            stock_df = stock_df[available_columns].copy()
-
-            # 限制天数
-            if len(stock_df) > days:
-                stock_df = stock_df.tail(days)
-
-            return stock_df
-
-        except Exception as e:
-            logger.error(f"读取模拟数据失败: {e}")
-            return pd.DataFrame()
 
     def get_stock_list(self, limit: Optional[int] = None, source: Optional[DataSource] = None, force_refresh: bool = False) -> pd.DataFrame:
         """
@@ -243,46 +181,12 @@ class DataSourceManager:
                         cache.save_stock_list_cache(df)
                         return df
 
-                elif ds == DataSource.MOCK:
-                    # 从模拟数据中提取股票列表
-                    df = self._get_mock_stock_list(limit)
-                    if not df.empty:
-                        logger.info(f"✓ 使用模拟数据成功获取股票列表")
-                        # 保存到缓存
-                        cache.save_stock_list_cache(df)
-                        return df
-
             except Exception as e:
                 logger.warning(f"数据源 {ds.value} 获取股票列表失败: {e}")
                 continue
 
         logger.error("所有数据源都失败")
         return pd.DataFrame()
-
-    def _get_mock_stock_list(self, limit: Optional[int] = None) -> pd.DataFrame:
-        """从模拟数据中提取股票列表"""
-        try:
-            import os
-
-            if not os.path.exists(self.mock_data_path):
-                return pd.DataFrame()
-
-            df = pd.read_csv(self.mock_data_path, index_col=0)
-
-            if 'code' in df.columns and 'name' in df.columns:
-                # 提取唯一股票代码
-                stock_list = df[['code', 'name']].drop_duplicates()
-
-                if limit:
-                    stock_list = stock_list.head(limit)
-
-                return stock_list
-            else:
-                return pd.DataFrame()
-
-        except Exception as e:
-            logger.error(f"提取模拟股票列表失败: {e}")
-            return pd.DataFrame()
 
     def get_batch_kline(self, stock_codes: List[str], days: int = 300, source: Optional[DataSource] = None) -> dict:
         """

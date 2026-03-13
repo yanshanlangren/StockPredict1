@@ -1,25 +1,23 @@
 """
 腾讯财经数据爬虫 - 使用AKShare的腾讯财经数据源
-支持Python 3.6+：当akshare不可用时，自动降级到模拟数据
 """
 import pandas as pd
 import time
 import logging
 from typing import Optional, List
 from datetime import datetime, timedelta
-import random
 
-# 尝试导入akshare，如果失败则使用模拟数据
+# 尝试导入akshare
 try:
     import akshare as ak
     AKSHARE_AVAILABLE = True
     logger = logging.getLogger(__name__)
-    logger.info("✓ akshare库已加载，将使用真实数据源")
+    logger.info("✓ akshare库已加载")
 except ImportError:
     AKSHARE_AVAILABLE = False
     logger = logging.getLogger(__name__)
-    logger.warning("⚠️  akshare库未安装（需要Python 3.8+），将使用模拟数据源")
-    logger.warning("提示: 安装完整版请运行: pip install -r requirements_full.txt")
+    logger.error("✗ akshare库未安装，数据获取功能不可用")
+    logger.error("请运行: pip install akshare")
 
 
 class TencentFinanceCrawler:
@@ -59,10 +57,10 @@ class TencentFinanceCrawler:
         """
         logger.info(f"开始获取股票 {stock_code} K线数据...")
 
-        # 如果akshare不可用，使用模拟数据
+        # 检查akshare是否可用
         if not AKSHARE_AVAILABLE:
-            logger.info(f"使用模拟数据源生成 {stock_code} 的 {days} 天数据")
-            return self._generate_mock_data(stock_code, days)
+            logger.error("akshare库不可用，无法获取数据")
+            return pd.DataFrame()
 
         try:
             self._rate_limit()
@@ -160,9 +158,9 @@ class TencentFinanceCrawler:
         """
         logger.info("开始获取股票列表...")
 
-        # 如果akshare不可用，直接返回预定义列表
+        # 检查akshare是否可用
         if not AKSHARE_AVAILABLE:
-            logger.info("akshare不可用，使用预定义的股票列表")
+            logger.error("akshare库不可用，使用预定义的股票列表")
             return self._get_predefined_stocks(limit)
 
         try:
@@ -295,69 +293,6 @@ class TencentFinanceCrawler:
 
         df.to_csv(filepath)
         logger.info(f"已保存到: {filepath}")
-
-    def _generate_mock_data(self, stock_code: str, days: int = 300) -> pd.DataFrame:
-        """
-        生成模拟股票数据（当akshare不可用时使用）
-
-        Args:
-            stock_code: 股票代码
-            days: 生成天数
-
-        Returns:
-            DataFrame: 模拟的股票K线数据
-        """
-        try:
-            # 根据股票代码生成一个基础价格（为了保持一致性）
-            base_price = 10 + (int(stock_code.replace('sh', '').replace('sz', '').replace('000', '')) % 50)
-
-            # 生成日期序列
-            end_date = datetime.now()
-            dates = pd.date_range(end=end_date - timedelta(days=1), periods=days, freq='D')
-
-            # 过滤周末
-            dates = dates[dates.weekday < 5]
-
-            # 生成模拟数据
-            data = []
-            current_price = base_price
-
-            for i, date in enumerate(dates):
-                # 随机波动（-3% 到 +3%）
-                change_pct = random.uniform(-0.03, 0.03)
-
-                # 计算当日价格
-                open_price = current_price * (1 + random.uniform(-0.01, 0.01))
-                close_price = open_price * (1 + change_pct)
-                high_price = max(open_price, close_price) * (1 + random.uniform(0, 0.02))
-                low_price = min(open_price, close_price) * (1 - random.uniform(0, 0.02))
-
-                # 成交量（百万股）
-                volume = random.uniform(100, 1000)
-
-                data.append({
-                    'date': date,
-                    'open': round(open_price, 2),
-                    'high': round(high_price, 2),
-                    'low': round(low_price, 2),
-                    'close': round(close_price, 2),
-                    'volume': round(volume, 2),
-                    'change_pct': round(change_pct * 100, 2)
-                })
-
-                # 更新当前价格
-                current_price = close_price
-
-            # 创建DataFrame
-            df = pd.DataFrame(data)
-            df.set_index('date', inplace=True)
-
-            logger.info(f"已生成 {stock_code} 的 {len(df)} 天模拟数据")
-            return df
-
-        except Exception as e:
-            logger.error(f"生成模拟数据失败: {e}")
-            return pd.DataFrame()
 
 
 # 测试代码
