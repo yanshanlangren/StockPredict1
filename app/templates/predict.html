@@ -222,6 +222,8 @@ async function startBatchPredict() {
 function displayResults(data, holdDays) {
     const predictions = data.predictions;
     const totalAnalyzed = data.total_analyzed;
+    const totalUp = data.up_count || 0;
+    const totalDown = data.down_count || 0;
     
     if (predictions.length === 0) {
         document.getElementById('no-results').style.display = 'block';
@@ -230,12 +232,9 @@ function displayResults(data, holdDays) {
     
     document.getElementById('predict-results').style.display = 'block';
     
-    // 统计信息
-    const upCount = predictions.filter(p => p.prediction === 1).length;
-    const downCount = predictions.length - upCount;
-    const avgReturn = predictions.reduce((sum, p) => sum + p.expected_return, 0) / predictions.length;
-    const avgConfidence = predictions.reduce((sum, p) => sum + p.confidence, 0) / predictions.length;
+    // 统计信息（显示全部分析股票的涨跌情况）
     const topReturn = predictions.length > 0 ? predictions[0].expected_return : 0;
+    const avgConfidence = predictions.reduce((sum, p) => sum + p.confidence, 0) / predictions.length;
     
     document.getElementById('result-stats').innerHTML = `
         <div style="text-align: center;">
@@ -244,11 +243,11 @@ function displayResults(data, holdDays) {
         </div>
         <div style="text-align: center;">
             <div style="font-size: 12px; color: #888;">预测上涨</div>
-            <div style="font-size: 24px; font-weight: bold; color: #28a745;">${upCount}</div>
+            <div style="font-size: 24px; font-weight: bold; color: #28a745;">${totalUp}</div>
         </div>
         <div style="text-align: center;">
             <div style="font-size: 12px; color: #888;">预测下跌</div>
-            <div style="font-size: 24px; font-weight: bold; color: #dc3545;">${downCount}</div>
+            <div style="font-size: 24px; font-weight: bold; color: #dc3545;">${totalDown}</div>
         </div>
         <div style="text-align: center;">
             <div style="font-size: 12px; color: #888;">最高预期收益</div>

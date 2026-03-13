@@ -521,32 +521,59 @@ class MultiModalPredictor:
                         tech_features: np.ndarray,
                         relevance_features: np.ndarray) -> float:
         """简化版预测（加权融合）"""
-        # 新闻情感权重
+        # 新闻情感权重 (-1 到 1)
         news_score = float(news_features[0, 0]) * 0.5 + float(news_features[0, 6]) * 0.5
         
         # 领域影响权重
         sector_mean = np.mean(sector_features)
         sector_score = float(sector_mean) if not np.isnan(sector_mean) else 0.0
         
-        # 技术指标权重
-        tech_score = 0.5
+        # 技术指标评分 (-0.5 到 0.5)
+        tech_score = 0.0
         try:
-            if float(tech_features[0, 9]) > 0:  # 均线多头排列
-                tech_score += 0.2
-            if 0.3 < float(tech_features[0, 4]) < 0.7:  # RSI中性
+            # 均线趋势: 1=多头排列(涨), -1=空头排列(跌), 0=震荡
+            ma_trend = float(tech_features[0, 9])
+            tech_score += ma_trend * 0.15
+            
+            # RSI: 超卖(反弹概率高) vs 超买(回调概率高)
+            rsi = float(tech_features[0, 4])
+            if rsi < 0.3:  # 超卖
                 tech_score += 0.1
-            if float(tech_features[0, 6]) < 0.8:  # 未超买
+            elif rsi > 0.7:  # 超买
+                tech_score -= 0.1
+            
+            # 布林带位置
+            bb_pos = float(tech_features[0, 6])
+            if bb_pos < 0.2:  # 接近下轨，可能反弹
                 tech_score += 0.1
-            if float(tech_features[0, 0]) > 0:  # 近期上涨
+            elif bb_pos > 0.8:  # 接近上轨，可能回调
+                tech_score -= 0.1
+            
+            # 近期收益率
+            ret_5d = float(tech_features[0, 0])
+            if ret_5d > 2:  # 大涨后可能回调
+                tech_score -= 0.1
+            elif ret_5d < -2:  # 大跌后可能反弹
                 tech_score += 0.1
+            
+            # 动量
+            momentum = float(tech_features[0, 11])
+            if momentum < -3:  # 负动量过大
+                tech_score -= 0.1
+            elif momentum > 3:  # 正动量过大
+                tech_score += 0.05
+                
         except (IndexError, ValueError):
             pass
         
         # 相关性权重
-        relevance_score = 0.5
+        relevance_score = 0.0
         try:
-            if float(relevance_features[0, 0]) > 0.5:
-                relevance_score += 0.2
+            rel_mean = float(relevance_features[0, 0])
+            if rel_mean > 0.6:  # 强相关
+                relevance_score += 0.1
+            elif rel_mean < 0.3:  # 弱相关
+                relevance_score -= 0.05
         except (IndexError, ValueError):
             pass
         
@@ -562,8 +589,9 @@ class MultiModalPredictor:
         if np.isnan(combined) or np.isinf(combined):
             combined = 0.0
         
-        # 归一化
-        prob = 1 / (1 + np.exp(-combined * 5))
+        # 归一化到概率 (sigmoid函数)
+        # combined 范围约 -0.5 到 0.5，乘以系数放大差异
+        prob = 1 / (1 + np.exp(-combined * 8))
         
         return float(prob)
 

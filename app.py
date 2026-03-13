@@ -584,26 +584,27 @@ def predict_batch():
                 logger.debug(f"预测股票 {stock_code} 失败: {e}")
                 continue
         
-        # 排序
-        up_stocks = [p for p in predictions if p['prediction'] == 1]
-        down_stocks = [p for p in predictions if p['prediction'] == 0]
-        
-        up_stocks.sort(key=lambda x: x['expected_return'], reverse=True)
-        down_stocks.sort(key=lambda x: x['expected_return'], reverse=True)
-        
-        sorted_predictions = up_stocks + down_stocks
-        top_predictions = sorted_predictions[:top_n]
+        # 排序：按预期收益排序（下跌股票收益为负，自动排后面）
+        predictions.sort(key=lambda x: x['expected_return'], reverse=True)
+        top_predictions = predictions[:top_n]
         
         for idx, pred in enumerate(top_predictions, 1):
             pred['rank'] = idx
         
-        logger.info(f"批量预测完成，分析 {analyzed_count} 只股票")
+        # 统计（全部分析股票，而非仅TopN）
+        up_count = sum(1 for p in predictions if p['prediction'] == 1)
+        down_count = len(predictions) - up_count
+        
+        logger.info(f"批量预测完成，分析 {analyzed_count} 只股票，上涨{up_count}只，下跌{down_count}只")
         
         return jsonify({
             'success': True,
             'data': {
                 'predictions': top_predictions,
                 'total_analyzed': analyzed_count,
+                'total_predictions': len(predictions),
+                'up_count': up_count,
+                'down_count': down_count,
                 'analysis_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'hold_days': hold_days,
                 'model_info': {
