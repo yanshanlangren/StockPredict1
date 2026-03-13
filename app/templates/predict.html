@@ -6,8 +6,8 @@
     
     <!-- 模型状态提示 -->
     <div id="model-warning" style="display: none; margin-bottom: 20px; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
-        <strong>⚠️ 全局模型未训练</strong>
-        <p style="margin: 5px 0 0 0;">请先在首页训练全局模型后再进行预测。</p>
+        <strong>⚠️ 模型未训练</strong>
+        <p style="margin: 5px 0 0 0;">请先在首页训练多模态模型后再进行预测。</p>
     </div>
     
     <!-- 预测配置 -->
@@ -88,10 +88,10 @@
         <div id="tips-section" style="margin-top: 20px; padding: 15px; background: #e7f3ff; border-radius: 8px; border-left: 4px solid #007bff;">
             <strong>💡 使用提示</strong>
             <ul style="margin: 10px 0 0 0; padding-left: 20px; color: #333;">
-                <li>预测结果基于全局模型，仅供参考，不构成投资建议</li>
+                <li>预测结果基于多模态模型，融合新闻情感、技术指标和相关性分析</li>
                 <li id="hold-days-tip">预期收益为预测持有5个交易日后的收益率</li>
                 <li>置信度越高表示模型越确定预测方向</li>
-                <li>建议结合其他指标综合判断</li>
+                <li>建议结合其他指标综合判断，不构成投资建议</li>
             </ul>
         </div>
     </div>
@@ -120,7 +120,7 @@ async function checkModelStatus() {
         const response = await fetch('/api/model/info');
         const data = await response.json();
         
-        if (!data.global_model_available) {
+        if (!data.model_available) {
             document.getElementById('model-warning').style.display = 'block';
             document.getElementById('predict-btn').disabled = true;
             document.getElementById('predict-btn').style.background = '#6c757d';
@@ -139,15 +139,12 @@ async function startBatchPredict() {
     const minPrice = document.getElementById('min-price').value;
     const maxPrice = document.getElementById('max-price').value;
     
-    // 更新提示
     document.getElementById('hold-days-tip').textContent = 
         `预期收益为预测持有${holdDays}个交易日后的收益率`;
     
-    // 禁用按钮
     btn.disabled = true;
     btn.textContent = '⏳ 预测中...';
     
-    // 显示进度
     document.getElementById('predict-progress').style.display = 'block';
     document.getElementById('predict-results').style.display = 'none';
     document.getElementById('no-results').style.display = 'none';
@@ -179,7 +176,6 @@ async function startBatchPredict() {
         console.error('预测失败:', error);
         alert('预测失败: ' + error.message);
     } finally {
-        // 恢复按钮
         btn.disabled = false;
         btn.textContent = '🚀 开始预测';
         document.getElementById('predict-progress').style.display = 'none';
@@ -196,77 +192,64 @@ function displayResults(data, holdDays) {
         return;
     }
     
-    // 显示结果区域
     document.getElementById('predict-results').style.display = 'block';
     
     // 统计信息
     const upCount = predictions.filter(p => p.prediction === 1).length;
-    const downCount = predictions.filter(p => p.prediction === 0).length;
+    const downCount = predictions.length - upCount;
     const avgReturn = predictions.reduce((sum, p) => sum + p.expected_return, 0) / predictions.length;
-    const maxReturn = Math.max(...predictions.map(p => p.expected_return));
-    const minReturn = Math.min(...predictions.map(p => p.expected_return));
+    const avgConfidence = predictions.reduce((sum, p) => sum + p.confidence, 0) / predictions.length;
     
     document.getElementById('result-stats').innerHTML = `
         <div style="text-align: center;">
             <div style="font-size: 12px; color: #888;">分析股票数</div>
-            <div style="font-size: 24px; font-weight: 600; color: #333;">${totalAnalyzed}</div>
+            <div style="font-size: 24px; font-weight: bold;">${totalAnalyzed}</div>
         </div>
         <div style="text-align: center;">
             <div style="font-size: 12px; color: #888;">预测上涨</div>
-            <div style="font-size: 24px; font-weight: 600; color: #28a745;">${upCount} <span style="font-size: 14px;">只</span></div>
+            <div style="font-size: 24px; font-weight: bold; color: #28a745;">${upCount}</div>
         </div>
         <div style="text-align: center;">
             <div style="font-size: 12px; color: #888;">预测下跌</div>
-            <div style="font-size: 24px; font-weight: 600; color: #dc3545;">${downCount} <span style="font-size: 14px;">只</span></div>
+            <div style="font-size: 24px; font-weight: bold; color: #dc3545;">${downCount}</div>
         </div>
         <div style="text-align: center;">
-            <div style="font-size: 12px; color: #888;">平均预期收益 (${holdDays}天)</div>
-            <div style="font-size: 24px; font-weight: 600; color: ${avgReturn >= 0 ? '#28a745' : '#dc3545'};">
-                ${avgReturn >= 0 ? '+' : ''}${avgReturn.toFixed(2)}%
-            </div>
+            <div style="font-size: 12px; color: #888;">平均置信度</div>
+            <div style="font-size: 24px; font-weight: bold;">${(avgConfidence * 100).toFixed(1)}%</div>
         </div>
     `;
     
     // 表格内容
     const tbody = document.getElementById('result-table-body');
-    tbody.innerHTML = '';
-    
-    predictions.forEach(p => {
-        const row = document.createElement('tr');
-        row.style.cssText = 'border-bottom: 1px solid #dee2e6;';
-        
-        row.innerHTML = `
-            <td style="padding: 12px;">
-                <span style="display: inline-block; width: 30px; height: 30px; line-height: 30px; text-align: center; border-radius: 50%; background: ${p.rank <= 3 ? '#ffc107' : '#e9ecef'}; font-weight: 600;">
-                    ${p.rank}
-                </span>
-            </td>
-            <td style="padding: 12px; font-weight: 500;">${p.stock_code}</td>
-            <td style="padding: 12px;">${p.stock_name}</td>
-            <td style="padding: 12px; text-align: right;">¥${p.latest_price.toFixed(2)}</td>
-            <td style="padding: 12px; text-align: center;">
-                <span style="padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 500;
-                    background: ${p.prediction === 1 ? '#d4edda' : '#f8d7da'};
-                    color: ${p.prediction === 1 ? '#155724' : '#721c24'};">
-                    ${p.prediction_text}
-                </span>
-            </td>
-            <td style="padding: 12px; text-align: right; font-weight: 600; color: ${p.expected_return >= 0 ? '#28a745' : '#dc3545'};">
-                ${p.expected_return >= 0 ? '+' : ''}${p.expected_return.toFixed(2)}%
-            </td>
-            <td style="padding: 12px; text-align: right;">
-                <div style="display: flex; align-items: center; justify-content: flex-end;">
-                    <div style="width: 60px; height: 6px; background: #e9ecef; border-radius: 3px; margin-right: 8px;">
-                        <div style="width: ${p.confidence * 100}%; height: 100%; background: ${p.confidence > 0.6 ? '#28a745' : '#ffc107'}; border-radius: 3px;"></div>
-                    </div>
-                    <span>${(p.confidence * 100).toFixed(0)}%</span>
-                </div>
-            </td>
-            <td style="padding: 12px; text-align: right;">¥${p.predicted_price.toFixed(2)}</td>
+    tbody.innerHTML = predictions.map(p => {
+        const isUp = p.prediction === 1;
+        return `
+            <tr style="border-bottom: 1px solid #eee;" 
+                onmouseover="this.style.background='#f8f9fa'" 
+                onmouseout="this.style.background='white'"
+                onclick="window.location.href='/stock?code=${p.stock_code}'"
+                style="cursor: pointer;">
+                <td style="padding: 12px;">
+                    <span style="background: ${isUp ? '#28a745' : '#dc3545'}; color: white; padding: 3px 10px; border-radius: 12px; font-size: 12px;">
+                        ${p.rank}
+                    </span>
+                </td>
+                <td style="padding: 12px; font-weight: 500;">${p.stock_code}</td>
+                <td style="padding: 12px;">${p.stock_name}</td>
+                <td style="padding: 12px; text-align: right;">${p.latest_price.toFixed(2)}</td>
+                <td style="padding: 12px; text-align: center;">
+                    <span style="color: ${isUp ? '#28a745' : '#dc3545'}; font-weight: 500;">
+                        ${isUp ? '↑ 上涨' : '↓ 下跌'}
+                    </span>
+                </td>
+                <td style="padding: 12px; text-align: right; color: ${p.expected_return >= 0 ? '#28a745' : '#dc3545'}; font-weight: 500;">
+                    ${p.expected_return >= 0 ? '+' : ''}${p.expected_return.toFixed(2)}%
+                </td>
+                <td style="padding: 12px; text-align: right;">${(p.confidence * 100).toFixed(1)}%</td>
+                <td style="padding: 12px; text-align: right;">${p.predicted_price.toFixed(2)}</td>
+            </tr>
         `;
-        
-        tbody.appendChild(row);
-    });
+    }).join('');
 }
 </script>
 {% endblock %}

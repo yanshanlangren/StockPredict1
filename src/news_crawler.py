@@ -84,7 +84,8 @@ class NewsCrawler:
 
     def get_news(self, stock_code: Optional[str] = None, 
                  limit: int = 50,
-                 use_cache: bool = True) -> List[Dict]:
+                 use_cache: bool = True,
+                 source: str = 'eastmoney') -> List[Dict]:
         """
         获取财经新闻
 
@@ -92,6 +93,7 @@ class NewsCrawler:
             stock_code: 股票代码（可选，用于筛选相关新闻）
             limit: 返回数量限制
             use_cache: 是否使用缓存
+            source: 新闻源 ('eastmoney', 'sina', 'tencent', 'all')
 
         Returns:
             新闻列表
@@ -111,17 +113,45 @@ class NewsCrawler:
             # 获取新闻数据
             news_list = []
             
-            # 使用akshare获取财经新闻
-            try:
-                # 东方财富财经新闻
-                df = ak.stock_news_em(symbol="财经新闻")
-                if not df.empty:
-                    for _, row in df.iterrows():
-                        news_item = self._parse_news_row(row)
-                        if news_item:
-                            news_list.append(news_item)
-            except Exception as e:
-                logger.warning(f"获取东方财富新闻失败: {e}")
+            # 根据source参数获取不同来源的新闻
+            if source in ['eastmoney', 'all']:
+                try:
+                    # 东方财富财经新闻
+                    df = ak.stock_news_em(symbol="财经新闻")
+                    if not df.empty:
+                        for _, row in df.iterrows():
+                            news_item = self._parse_news_row(row)
+                            if news_item:
+                                news_item['source'] = news_item.get('source', '东方财富')
+                                news_list.append(news_item)
+                except Exception as e:
+                    logger.warning(f"获取东方财富新闻失败: {e}")
+            
+            if source in ['sina', 'all']:
+                try:
+                    # 新浪财经新闻
+                    df = ak.stock_news_em(symbol="新浪财经")
+                    if not df.empty:
+                        for _, row in df.iterrows():
+                            news_item = self._parse_news_row(row)
+                            if news_item:
+                                news_item['source'] = '新浪财经'
+                                news_list.append(news_item)
+                except Exception as e:
+                    logger.warning(f"获取新浪财经新闻失败: {e}")
+            
+            if source in ['tencent', 'all']:
+                try:
+                    # 腾讯财经新闻
+                    df = ak.stock_news_em(symbol="腾讯财经")
+                    if not df.empty:
+                        for _, row in df.iterrows():
+                            news_item = self._parse_news_row(row)
+                            if news_item:
+                                news_item['source'] = '腾讯财经'
+                                news_list.append(news_item)
+                except Exception as e:
+                    logger.warning(f"获取腾讯财经新闻失败: {e}")
 
             # 如果指定了股票代码，筛选相关新闻
             if stock_code and news_list:
@@ -401,6 +431,12 @@ class NewsCrawler:
                 if sector not in sectors:
                     sectors[sector] = 0
                 sectors[sector] += 1
+        
+        # 来源分布
+        sources = {}
+        for news in news_list:
+            source = news.get('source', '未知')
+            sources[source] = sources.get(source, 0) + 1
 
         return {
             'total': len(news_list),
@@ -411,7 +447,8 @@ class NewsCrawler:
             },
             'avg_sentiment': round(np.mean(sentiments), 3) if sentiments else 0,
             'avg_importance': round(np.mean([n.get('importance', 0) for n in news_list]), 2),
-            'sector_distribution': dict(sorted(sectors.items(), key=lambda x: x[1], reverse=True)[:10])
+            'sector_distribution': dict(sorted(sectors.items(), key=lambda x: x[1], reverse=True)[:10]),
+            'source_distribution': dict(sorted(sources.items(), key=lambda x: x[1], reverse=True))
         }
 
 

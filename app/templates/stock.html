@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 
 {% block content %}
+<!-- 股票查询区域 -->
 <div class="card">
-    <h2>📊 股票查询</h2>
+    <h2>📊 单股信息</h2>
 
     <div class="form-group">
         <label for="stock-code">股票代码：</label>
@@ -27,20 +28,66 @@
     <button class="btn btn-primary" onclick="loadStockData()">查询</button>
 </div>
 
+<!-- 公司信息 -->
+<div id="company-info" class="card" style="display: none; margin-top: 20px;">
+    <h3>🏢 公司信息</h3>
+    <div id="company-content"></div>
+</div>
+
+<!-- 基本统计信息 -->
 <div id="stock-info"></div>
 
+<!-- K线图 -->
 <div id="stock-chart" class="card" style="display: none;">
     <h2>📈 股价走势</h2>
     <div class="chart-container">
         <canvas id="klineChart"></canvas>
     </div>
 </div>
+
+<!-- 相关性图谱 -->
+<div id="relevance-section" class="card" style="display: none; margin-top: 20px;">
+    <h3>🔗 相关性图谱</h3>
+    <div id="relevance-graph" style="min-height: 300px; background: #f8f9fa; border-radius: 8px; padding: 20px;"></div>
+    
+    <!-- 相关股票列表 -->
+    <div style="margin-top: 20px;">
+        <h4>相关股票</h4>
+        <div id="related-stocks" style="display: flex; flex-wrap: wrap; gap: 10px;"></div>
+    </div>
+</div>
+
+<!-- 预测区域 -->
+<div id="predict-section" class="card" style="display: none; margin-top: 20px;">
+    <h3>🔮 多模态预测</h3>
+    <div style="display: flex; gap: 15px; margin-bottom: 15px; align-items: flex-end;">
+        <div>
+            <label style="display: block; margin-bottom: 5px;">预测天数</label>
+            <input type="number" id="predict-days" value="5" min="1" max="20" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; width: 100px;">
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                <input type="checkbox" id="use-news" checked> 使用新闻
+            </label>
+            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                <input type="checkbox" id="use-relevance" checked> 使用相关性
+            </label>
+        </div>
+        <button onclick="runPrediction()" style="padding: 8px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">
+            开始预测
+        </button>
+    </div>
+    
+    <div id="predict-result" style="display: none;"></div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
-// 全局变量存储股票列表
+// 全局变量
 let allStocks = [];
+let currentStockCode = '';
 
 // 加载股票列表
 async function loadStockList() {
@@ -49,7 +96,7 @@ async function loadStockList() {
         const data = await response.json();
 
         if (data.success) {
-            allStocks = data.data;  // 保存到全局变量
+            allStocks = data.data;
             updateStockSelect(allStocks);
             console.log(`已加载 ${data.total} 只股票`);
         } else {
@@ -67,10 +114,8 @@ function updateStockSelect(stocks) {
     const select = document.getElementById('stock-code');
     select.innerHTML = '<option value="">选择股票...</option>';
 
-    // 添加股票选项
     stocks.forEach(stock => {
         const option = document.createElement('option');
-        // 确保股票代码作为字符串存储
         option.value = String(stock.code);
         option.textContent = `${String(stock.code)} - ${stock.name}`;
         select.appendChild(option);
@@ -82,12 +127,10 @@ function filterStockList() {
     const filterText = document.getElementById('stock-code-input').value.toLowerCase().trim();
 
     if (!filterText) {
-        // 如果过滤框为空，显示所有股票
         updateStockSelect(allStocks);
         return;
     }
 
-    // 过滤股票列表
     const filteredStocks = allStocks.filter(stock => {
         return stock.code.includes(filterText) ||
                stock.name.toLowerCase().includes(filterText);
@@ -95,7 +138,6 @@ function filterStockList() {
 
     updateStockSelect(filteredStocks);
 
-    // 自动选择第一个匹配的股票
     if (filteredStocks.length > 0) {
         document.getElementById('stock-code').value = filteredStocks[0].code;
     }
@@ -115,7 +157,6 @@ async function loadStockData() {
     const stockCodeSelect = document.getElementById('stock-code').value;
     const days = document.getElementById('days').value;
 
-    // 优先使用输入框的值，如果为空则使用下拉框的值
     const stockCode = stockCodeInput || stockCodeSelect;
 
     if (!stockCode) {
@@ -123,94 +164,283 @@ async function loadStockData() {
         return;
     }
 
-    // 验证股票代码格式（6位数字）
     if (!/^\d{6}$/.test(stockCode)) {
-        alert('股票代码格式不正确，请输入6位数字（如：600000、000001）');
+        alert('股票代码格式不正确，请输入6位数字');
         return;
     }
 
-    const infoDiv = document.getElementById('stock-info');
-    const chartDiv = document.getElementById('stock-chart');
-
-    // 显示加载状态
+    currentStockCode = stockCode;
     showLoading('stock-info');
-    chartDiv.style.display = 'none';
+    document.getElementById('stock-chart').style.display = 'none';
+    document.getElementById('company-info').style.display = 'none';
+    document.getElementById('relevance-section').style.display = 'none';
+    document.getElementById('predict-section').style.display = 'none';
 
     try {
-        // 获取股票信息
-        const response = await apiRequest(`/api/stock/${stockCode}?days=${days}`);
+        // 并行加载数据
+        const [stockResponse, companyResponse, relevanceResponse] = await Promise.all([
+            fetch(`/api/stock/${stockCode}?days=${days}`),
+            fetch(`/api/company/${stockCode}`),
+            fetch(`/api/analysis/relevance-graph/${stockCode}`)
+        ]);
 
-        if (response.success) {
-            const data = response.data;
-
-            // 显示统计信息
-            const statsHtml = `
-                <div class="card">
-                    <h2>📋 ${data.code} - 基本信息</h2>
-                    <div class="stats-grid">
-                        <div class="stat-card">
-                            <div class="label">当前价格</div>
-                            <div class="value">${data.stats.current}</div>
-                        </div>
-                        <div class="stat-card ${data.stats.change >= 0 ? 'positive' : 'negative'}">
-                            <div class="label">涨跌幅</div>
-                            <div class="value">${formatPercent(data.stats.change)}</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="label">最高价</div>
-                            <div class="value">${data.stats.high}</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="label">最低价</div>
-                            <div class="value">${data.stats.low}</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="label">总成交量</div>
-                            <div class="value" style="font-size: 20px;">${(data.stats.volume / 100000000).toFixed(2)}亿</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="label">数据天数</div>
-                            <div class="value">${data.stats.days}</div>
-                        </div>
-                    </div>
-                </div>
-            `;
-
-            infoDiv.innerHTML = statsHtml;
-
-            // 显示图表
-            chartDiv.style.display = 'block';
-            createKLineChart('klineChart', data.kline);
-
-            // 更新URL参数
-            const url = new URL(window.location);
-            url.searchParams.set('code', stockCode);
-            window.history.pushState({}, '', url);
-
+        // 处理股票数据
+        const stockData = await stockResponse.json();
+        if (stockData.success) {
+            displayStockInfo(stockData.data);
+            document.getElementById('stock-chart').style.display = 'block';
+            createKLineChart('klineChart', stockData.data.kline);
         } else {
-            showError('stock-info', response.message);
+            showError('stock-info', stockData.message);
         }
+
+        // 处理公司信息
+        const companyData = await companyResponse.json();
+        if (companyData.success) {
+            displayCompanyInfo(companyData.data);
+            document.getElementById('company-info').style.display = 'block';
+        }
+
+        // 处理相关性图谱
+        const relevanceData = await relevanceResponse.json();
+        if (relevanceData.success) {
+            displayRelevanceGraph(relevanceData.data);
+            document.getElementById('relevance-section').style.display = 'block';
+        }
+
+        // 显示预测区域
+        document.getElementById('predict-section').style.display = 'block';
+
+        // 更新URL
+        const url = new URL(window.location);
+        url.searchParams.set('code', stockCode);
+        window.history.pushState({}, '', url);
 
     } catch (error) {
         showError('stock-info', error.message);
     }
 }
 
+// 显示股票基本信息
+function displayStockInfo(data) {
+    const infoDiv = document.getElementById('stock-info');
+    const statsHtml = `
+        <div class="card">
+            <h2>📋 ${data.code} - 基本信息</h2>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="label">当前价格</div>
+                    <div class="value">${data.stats.current}</div>
+                </div>
+                <div class="stat-card ${data.stats.change >= 0 ? 'positive' : 'negative'}">
+                    <div class="label">涨跌幅</div>
+                    <div class="value">${formatPercent(data.stats.change)}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">最高价</div>
+                    <div class="value">${data.stats.high}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">最低价</div>
+                    <div class="value">${data.stats.low}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">总成交量</div>
+                    <div class="value" style="font-size: 20px;">${(data.stats.volume / 100000000).toFixed(2)}亿</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">数据天数</div>
+                    <div class="value">${data.stats.days}</div>
+                </div>
+            </div>
+        </div>
+    `;
+    infoDiv.innerHTML = statsHtml;
+}
+
+// 显示公司信息
+function displayCompanyInfo(data) {
+    const info = data.info || {};
+    const financial = data.financial || {};
+    const business = data.business || {};
+    
+    const html = `
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
+            <div>
+                <h4 style="margin: 0 0 10px 0; color: #333;">基本信息</h4>
+                <table style="width: 100%; font-size: 14px;">
+                    <tr><td style="padding: 5px 0; color: #666;">股票名称</td><td style="font-weight: 500;">${info.name || '-'}</td></tr>
+                    <tr><td style="padding: 5px 0; color: #666;">所属行业</td><td style="font-weight: 500;">${info.industry || '-'}</td></tr>
+                    <tr><td style="padding: 5px 0; color: #666;">所属板块</td><td style="font-weight: 500;">${info.sector || '-'}</td></tr>
+                    <tr><td style="padding: 5px 0; color: #666;">上市日期</td><td style="font-weight: 500;">${info.listing_date || '-'}</td></tr>
+                    <tr><td style="padding: 5px 0; color: #666;">交易市场</td><td style="font-weight: 500;">${info.market || '-'}</td></tr>
+                </table>
+            </div>
+            <div>
+                <h4 style="margin: 0 0 10px 0; color: #333;">主营业务</h4>
+                <p style="margin: 0; font-size: 14px; color: #555; line-height: 1.6;">${info.business || '暂无信息'}</p>
+                ${info.concepts && info.concepts.length > 0 ? `
+                    <div style="margin-top: 10px;">
+                        <span style="font-size: 12px; color: #888;">概念板块：</span>
+                        ${info.concepts.map(c => `<span style="background: #e3f2fd; color: #1976d2; padding: 2px 8px; border-radius: 10px; font-size: 11px; margin-right: 5px;">${c}</span>`).join('')}
+                    </div>
+                ` : ''}
+            </div>
+        </div>
+        ${financial && Object.keys(financial).length > 0 ? `
+            <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
+                <h4 style="margin: 0 0 10px 0; color: #333;">财务指标</h4>
+                <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                    ${financial.pe ? `<span>市盈率(PE): <strong>${financial.pe}</strong></span>` : ''}
+                    ${financial.pb ? `<span>市净率(PB): <strong>${financial.pb}</strong></span>` : ''}
+                    ${financial.market_cap ? `<span>总市值: <strong>${(financial.market_cap / 100000000).toFixed(2)}亿</strong></span>` : ''}
+                    ${financial.roe ? `<span>ROE: <strong>${financial.roe}%</strong></span>` : ''}
+                </div>
+            </div>
+        ` : ''}
+    `;
+    document.getElementById('company-content').innerHTML = html;
+}
+
+// 显示相关性图谱
+function displayRelevanceGraph(data) {
+    // 显示相关股票
+    const relatedDiv = document.getElementById('related-stocks');
+    const relatedStocks = data.nodes.filter(n => n.type === 'stock' && n.id !== data.center);
+    
+    if (relatedStocks.length > 0) {
+        relatedDiv.innerHTML = relatedStocks.map(stock => `
+            <div style="background: #f8f9fa; padding: 10px 15px; border-radius: 8px; cursor: pointer; transition: all 0.2s;" 
+                 onclick="selectStock('${stock.id}')"
+                 onmouseover="this.style.background='#e9ecef'" 
+                 onmouseout="this.style.background='#f8f9fa'">
+                <div style="font-weight: 500;">${stock.label}</div>
+                <div style="font-size: 12px; color: #666;">${stock.id}</div>
+            </div>
+        `).join('');
+    } else {
+        relatedDiv.innerHTML = '<span style="color: #888;">暂无相关股票数据</span>';
+    }
+    
+    // 简化图谱显示
+    const graphDiv = document.getElementById('relevance-graph');
+    const sectors = data.nodes.filter(n => n.type === 'sector');
+    
+    graphDiv.innerHTML = `
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;">
+            <div style="background: #28a745; color: white; padding: 15px 25px; border-radius: 50px; font-weight: 500;">
+                ${data.center}
+            </div>
+            ${sectors.map(s => {
+                const edge = data.edges.find(e => e.target === s.id || e.source === s.id);
+                const weight = edge ? edge.weight : 0.5;
+                return `
+                    <div style="background: ${weight > 0.7 ? '#007bff' : (weight > 0.4 ? '#17a2b8' : '#6c757d')}; 
+                                color: white; padding: 10px 20px; border-radius: 20px; font-size: 14px;">
+                        ${s.label} (${(weight * 100).toFixed(0)}%)
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+}
+
+// 选择股票
+function selectStock(code) {
+    document.getElementById('stock-code-input').value = code;
+    document.getElementById('stock-code').value = code;
+    loadStockData();
+}
+
+// 运行预测
+async function runPrediction() {
+    if (!currentStockCode) {
+        alert('请先选择股票');
+        return;
+    }
+    
+    const days = parseInt(document.getElementById('days').value);
+    const useNews = document.getElementById('use-news').checked;
+    const useRelevance = document.getElementById('use-relevance').checked;
+    
+    const resultDiv = document.getElementById('predict-result');
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<div style="text-align: center; padding: 20px;">⏳ 预测中...</div>';
+    
+    try {
+        const response = await fetch(`/api/predict/multimodal/${currentStockCode}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                days: days,
+                use_news: useNews,
+                use_relevance: useRelevance
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            const result = data.data;
+            const isUp = result.prediction === 1;
+            
+            resultDiv.innerHTML = `
+                <div style="background: ${isUp ? '#d4edda' : '#f8d7da'}; padding: 20px; border-radius: 8px; border-left: 4px solid ${isUp ? '#28a745' : '#dc3545'};">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h4 style="margin: 0;">预测结果: <span style="color: ${isUp ? '#28a745' : '#dc3545'};">${result.prediction_text}</span></h4>
+                        <span style="font-size: 24px; font-weight: bold; color: ${isUp ? '#28a745' : '#dc3545'};">
+                            ${isUp ? '↑' : '↓'} ${result.expected_return}%
+                        </span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; font-size: 14px;">
+                        <div>
+                            <div style="color: #666;">当前价格</div>
+                            <div style="font-weight: 500; font-size: 16px;">${result.latest_price}</div>
+                        </div>
+                        <div>
+                            <div style="color: #666;">预测价格</div>
+                            <div style="font-weight: 500; font-size: 16px;">${result.predicted_price}</div>
+                        </div>
+                        <div>
+                            <div style="color: #666;">置信度</div>
+                            <div style="font-weight: 500; font-size: 16px;">${(result.confidence * 100).toFixed(1)}%</div>
+                        </div>
+                        <div>
+                            <div style="color: #666;">新闻数量</div>
+                            <div style="font-weight: 500; font-size: 16px;">${result.news_count || 0}</div>
+                        </div>
+                    </div>
+                    ${result.feature_summary ? `
+                        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
+                            <div style="font-size: 12px; color: #666;">特征分析</div>
+                            <div style="display: flex; gap: 15px; flex-wrap: wrap; margin-top: 5px;">
+                                <span>新闻情感: ${result.feature_summary.news_sentiment?.toFixed(2) || '-'}</span>
+                                <span>RSI: ${result.feature_summary.rsi?.toFixed(2) || '-'}</span>
+                                <span>领域影响: ${result.feature_summary.sector_impact?.toFixed(2) || '-'}</span>
+                                <span>趋势: ${result.feature_summary.tech_trend || '-'}</span>
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        } else {
+            resultDiv.innerHTML = `<div style="background: #f8d7da; padding: 15px; border-radius: 8px; color: #721c24;">❌ ${data.message}</div>`;
+        }
+    } catch (error) {
+        resultDiv.innerHTML = `<div style="background: #f8d7da; padding: 15px; border-radius: 8px; color: #721c24;">❌ 预测失败: ${error.message}</div>`;
+    }
+}
+
 // 页面加载时
 document.addEventListener('DOMContentLoaded', function() {
-    // 加载股票列表
     loadStockList();
-
+    
     // 检查URL参数
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
-
     if (code) {
-        // 等待股票列表加载完成后选择股票
-        setTimeout(() => {
-            document.getElementById('stock-code').value = code;
-            loadStockData();
-        }, 500);
+        document.getElementById('stock-code-input').value = code;
+        setTimeout(() => loadStockData(), 500);
     }
 });
 </script>
