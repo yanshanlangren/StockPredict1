@@ -13,7 +13,13 @@
     <!-- 预测配置 -->
     <div style="margin-bottom: 20px;">
         <h3 style="margin: 0 0 15px 0; font-size: 16px;">⚙️ 预测配置</h3>
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px;">
+        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px;">
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">分析股票数量</label>
+                <input type="number" id="analyze-count" value="100" min="10" max="5000" 
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <small style="color: #888;">最多5000只</small>
+            </div>
             <div>
                 <label style="display: block; margin-bottom: 5px; font-weight: 500;">返回数量 (Top N)</label>
                 <input type="number" id="top-n" value="20" min="5" max="100" 
@@ -39,6 +45,12 @@
                 <small style="color: #888;">过滤高价股</small>
             </div>
         </div>
+        
+        <!-- 时间预估 -->
+        <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 4px; font-size: 13px; color: #666;">
+            ⏱️ 预估时间：<span id="estimated-time">约 30 秒</span>
+            <span style="margin-left: 15px;">💡 分析数量越多，预测越准确，但耗时更长</span>
+        </div>
     </div>
     
     <!-- 预测按钮 -->
@@ -52,6 +64,9 @@
         <div style="font-size: 40px; margin-bottom: 15px;">🔄</div>
         <div style="font-size: 18px; margin-bottom: 10px;" id="progress-message">正在分析股票...</div>
         <div style="color: #666;" id="progress-detail">已分析: 0 只股票</div>
+        <div style="margin-top: 15px; background: #e9ecef; border-radius: 4px; height: 8px; overflow: hidden; max-width: 300px; margin-left: auto; margin-right: auto;">
+            <div id="progress-bar" style="background: #28a745; height: 100%; width: 0%; transition: width 0.3s;"></div>
+        </div>
     </div>
 </div>
 
@@ -61,7 +76,7 @@
         <h2>📊 预测结果</h2>
         
         <!-- 统计信息 -->
-        <div id="result-stats" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+        <div id="result-stats" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
         </div>
         
         <!-- 结果表格 -->
@@ -109,6 +124,18 @@
 
 {% block scripts %}
 <script>
+// 更新预估时间
+document.getElementById('analyze-count').addEventListener('input', function() {
+    const count = parseInt(this.value) || 100;
+    const seconds = Math.round(count * 0.3);
+    if (seconds < 60) {
+        document.getElementById('estimated-time').textContent = `约 ${seconds} 秒`;
+    } else {
+        const minutes = Math.round(seconds / 60);
+        document.getElementById('estimated-time').textContent = `约 ${minutes} 分钟`;
+    }
+});
+
 // 页面加载时检查模型状态
 document.addEventListener('DOMContentLoaded', async function() {
     await checkModelStatus();
@@ -134,6 +161,7 @@ async function checkModelStatus() {
 // 开始批量预测
 async function startBatchPredict() {
     const btn = document.getElementById('predict-btn');
+    const analyzeCount = document.getElementById('analyze-count').value;
     const topN = document.getElementById('top-n').value;
     const holdDays = document.getElementById('hold-days').value;
     const minPrice = document.getElementById('min-price').value;
@@ -150,6 +178,7 @@ async function startBatchPredict() {
     document.getElementById('no-results').style.display = 'none';
     document.getElementById('progress-message').textContent = '正在分析股票列表...';
     document.getElementById('progress-detail').textContent = '已分析: 0 只股票';
+    document.getElementById('progress-bar').style.width = '0%';
     
     try {
         const response = await fetch('/api/predict/batch', {
@@ -158,6 +187,7 @@ async function startBatchPredict() {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
+                analyze_count: parseInt(analyzeCount),
                 top_n: parseInt(topN),
                 hold_days: parseInt(holdDays),
                 min_price: parseFloat(minPrice),
@@ -199,6 +229,7 @@ function displayResults(data, holdDays) {
     const downCount = predictions.length - upCount;
     const avgReturn = predictions.reduce((sum, p) => sum + p.expected_return, 0) / predictions.length;
     const avgConfidence = predictions.reduce((sum, p) => sum + p.confidence, 0) / predictions.length;
+    const topReturn = predictions.length > 0 ? predictions[0].expected_return : 0;
     
     document.getElementById('result-stats').innerHTML = `
         <div style="text-align: center;">
@@ -212,6 +243,10 @@ function displayResults(data, holdDays) {
         <div style="text-align: center;">
             <div style="font-size: 12px; color: #888;">预测下跌</div>
             <div style="font-size: 24px; font-weight: bold; color: #dc3545;">${downCount}</div>
+        </div>
+        <div style="text-align: center;">
+            <div style="font-size: 12px; color: #888;">最高预期收益</div>
+            <div style="font-size: 24px; font-weight: bold; color: #28a745;">${topReturn >= 0 ? '+' : ''}${topReturn.toFixed(2)}%</div>
         </div>
         <div style="text-align: center;">
             <div style="font-size: 12px; color: #888;">平均置信度</div>

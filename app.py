@@ -472,19 +472,22 @@ def predict_batch():
     
     请求参数:
     {
-        "top_n": 20,       # 返回前N只股票
-        "min_price": 0,    # 最低价格过滤
-        "max_price": 1000  # 最高价格过滤
+        "analyze_count": 100,  # 分析股票数量 (默认100, 最多5000)
+        "top_n": 20,           # 返回前N只股票
+        "hold_days": 5,        # 持有天数
+        "min_price": 0,        # 最低价格过滤
+        "max_price": 10000     # 最高价格过滤
     }
     """
     try:
         params = request.json if request.json else {}
+        analyze_count = min(int(params.get('analyze_count', 100)), 5000)  # 最多5000只
         top_n = int(params.get('top_n', 20))
         hold_days = int(params.get('hold_days', 5))
         min_price = float(params.get('min_price', 0))
         max_price = float(params.get('max_price', 10000))
         
-        logger.info(f"开始批量预测，top_n={top_n}")
+        logger.info(f"开始批量预测，analyze_count={analyze_count}, top_n={top_n}")
         
         # 获取股票列表
         stock_list = data_manager.get_stock_list()
@@ -501,9 +504,8 @@ def predict_batch():
         
         predictions = []
         analyzed_count = 0
-        max_analyze = 100  # 限制最多分析100只股票
         
-        for idx, stock in stock_list.head(max_analyze).iterrows():
+        for idx, stock in stock_list.head(analyze_count).iterrows():
             stock_code = str(stock['code'])
             stock_name = stock.get('name', stock_code)
             
