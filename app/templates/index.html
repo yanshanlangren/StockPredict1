@@ -118,6 +118,54 @@ document.addEventListener('DOMContentLoaded', async function() {
     checkTrainingStatus();
 });
 
+// 页面可见性变化监听 - 切回首页时显示训练进度
+document.addEventListener('visibilitychange', async function() {
+    if (!document.hidden) {
+        // 页面重新可见时，检查训练状态
+        console.log('页面切回可见，检查训练状态...');
+        const wasTrainingVisible = document.getElementById('training-progress').style.display !== 'none';
+        
+        // 先检查训练状态
+        await checkTrainingStatus();
+        
+        // 如果正在训练且进度区域未显示，显示它
+        try {
+            const response = await fetch('/api/model/train/status');
+            const data = await response.json();
+            
+            if (data.success && data.status.is_training) {
+                // 正在训练，确保进度区域可见
+                document.getElementById('training-progress').style.display = 'block';
+                document.getElementById('training-config').style.opacity = '0.5';
+                document.getElementById('training-config').style.pointerEvents = 'none';
+                
+                const btn = document.getElementById('train-btn');
+                btn.disabled = true;
+                btn.textContent = '⏳ 训练中...';
+                
+                // 恢复轮询
+                if (!statusInterval) {
+                    pollTrainingStatus();
+                }
+                
+                // 显示提示消息
+                const messageDiv = document.getElementById('refresh-message');
+                messageDiv.style.display = 'block';
+                messageDiv.style.background = '#fff3cd';
+                messageDiv.style.color = '#856404';
+                messageDiv.textContent = '📊 检测到正在进行模型训练，已恢复进度显示';
+                
+                // 3秒后隐藏消息
+                setTimeout(() => {
+                    messageDiv.style.display = 'none';
+                }, 3000);
+            }
+        } catch (error) {
+            console.error('检查训练状态失败:', error);
+        }
+    }
+});
+
 // 加载股票数据
 async function loadStockData() {
     try {

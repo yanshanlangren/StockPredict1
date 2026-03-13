@@ -528,10 +528,11 @@ def predict_batch():
         # 获取参数
         params = request.json if request.json else {}
         top_n = int(params.get('top_n', 20))
+        hold_days = int(params.get('hold_days', 5))  # 持有天数
         min_price = float(params.get('min_price', 0))
         max_price = float(params.get('max_price', 10000))
         
-        logger.info(f"开始批量预测，top_n={top_n}")
+        logger.info(f"开始批量预测，top_n={top_n}, hold_days={hold_days}")
         
         # 获取股票列表
         stock_list = data_manager.get_stock_list(limit=200)  # 限制分析数量
@@ -567,6 +568,14 @@ def predict_batch():
                 result = global_model.predict(df)
                 
                 if result['success']:
+                    # 根据hold_days调整预期收益
+                    # 基础收益（5天）按比例调整
+                    base_return = result['expected_return']
+                    # 简单线性缩放：hold_days天的收益 = 基础收益 * (hold_days / 5)
+                    adjusted_return = base_return * (hold_days / 5.0)
+                    # 预测价格也相应调整
+                    adjusted_price = latest_price * (1 + adjusted_return / 100)
+                    
                     predictions.append({
                         'stock_code': stock_code,
                         'stock_name': stock_name,
@@ -575,9 +584,9 @@ def predict_batch():
                         'prediction_text': result['prediction_text'],
                         'probability': float(round(result['probability'], 4)),
                         'confidence': float(round(result['confidence'], 4)),
-                        'expected_return': float(result['expected_return']),
-                        'predicted_price': float(result['predicted_price']),
-                        'predict_days': int(result['predict_days'])
+                        'expected_return': float(round(adjusted_return, 2)),  # 调整后的预期收益
+                        'predicted_price': float(round(adjusted_price, 2)),   # 调整后的预测价格
+                        'hold_days': hold_days
                     })
                     
                     analyzed_count += 1
@@ -586,11 +595,7 @@ def predict_batch():
                 logger.warning(f"预测股票 {stock_code} 失败: {e}")
                 continue
         
-        # 排序逻辑：
-        # 1. 预测上涨的股票优先
-        # 2. 同方向内按预期收益率排序
-        predictions.sort(key=lambda x: (-x['prediction'], x['expected_return']), reverse=False)
-        # 重新计算：上涨的在前，然后按收益降序
+        # 排序逻辑：上涨优先，然后按收益降序
         up_stocks = [p for p in predictions if p['prediction'] == 1]
         down_stocks = [p for p in predictions if p['prediction'] == 0]
         
@@ -617,9 +622,10 @@ def predict_batch():
                 'predictions': top_predictions,
                 'total_analyzed': analyzed_count,
                 'analysis_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'hold_days': hold_days,
                 'model_info': {
                     'model_name': 'global_stock_model',
-                    'predict_days': 5
+                    'base_predict_days': 5
                 }
             }
         })
