@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- 新闻查询 -->
+<div class="card">
+    <h2>📰 新闻查询</h2>
+    
+    <!-- 搜索区域 -->
+    <div style="margin-bottom: 20px;">
+        <div style="display: flex; gap: 15px; align-items: flex-end;">
+            <div style="flex: 1;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">股票代码（可选）</label>
+                <input type="text" id="stock-code" placeholder="如: 600519" 
+                       style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+            <div style="width: 150px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">新闻数量</label>
+                <input type="number" id="news-limit" value="30" min="10" max="100"
+                       style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+            <button onclick="loadNews()" 
+                    style="padding: 10px 25px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                🔍 查询
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 新闻统计 -->
+<div class="card" style="margin-top: 20px;" id="stats-section" style="display: none;">
+    <h3>📊 新闻统计</h3>
+    <div class="stats-grid" id="news-stats">
+        <div class="stat-card">
+            <div class="label">新闻总数</div>
+            <div class="value" id="total-news">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">正面新闻</div>
+            <div class="value" style="color: #28a745;" id="positive-news">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">负面新闻</div>
+            <div class="value" style="color: #dc3545;" id="negative-news">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">平均情感</div>
+            <div class="value" id="avg-sentiment">-</div>
+        </div>
+    </div>
+    
+    <!-- 领域分布 -->
+    <div style="margin-top: 20px;">
+        <h4 style="margin-bottom: 10px;">领域分布</h4>
+        <div id="sector-distribution" style="display: flex; flex-wrap: wrap; gap: 10px;"></div>
+    </div>
+</div>
+
+<!-- 新闻列表 -->
+<div class="card" style="margin-top: 20px;">
+    <h3>📋 新闻列表</h3>
+    <div id="news-list" style="margin-top: 15px;">
+        <div style="text-align: center; color: #666; padding: 40px;">
+            请输入查询条件后点击查询按钮
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadNews() {
+    const stockCode = document.getElementById('stock-code').value.trim();
+    const limit = document.getElementById('news-limit').value;
+    
+    const newsListDiv = document.getElementById('news-list');
+    newsListDiv.innerHTML = '<div style="text-align: center; padding: 40px;">⏳ 加载中...</div>';
+    
+    try {
+        let url = `/api/news?limit=${limit}`;
+        if (stockCode) {
+            url += `&stock_code=${stockCode}`;
+        }
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.success) {
+            displayNews(data.data.news);
+            displayStatistics(data.data.statistics);
+        } else {
+            newsListDiv.innerHTML = `<div style="text-align: center; color: #dc3545; padding: 40px;">❌ ${data.message}</div>`;
+        }
+    } catch (error) {
+        console.error('加载新闻失败:', error);
+        newsListDiv.innerHTML = '<div style="text-align: center; color: #dc3545; padding: 40px;">❌ 加载失败，请稍后重试</div>';
+    }
+}
+
+function displayStatistics(stats) {
+    document.getElementById('stats-section').style.display = 'block';
+    document.getElementById('total-news').textContent = stats.total || 0;
+    document.getElementById('positive-news').textContent = stats.sentiment_distribution?.positive || 0;
+    document.getElementById('negative-news').textContent = stats.sentiment_distribution?.negative || 0;
+    
+    const avgSentiment = stats.avg_sentiment || 0;
+    const sentimentEl = document.getElementById('avg-sentiment');
+    sentimentEl.textContent = avgSentiment.toFixed(2);
+    sentimentEl.style.color = avgSentiment > 0.1 ? '#28a745' : (avgSentiment < -0.1 ? '#dc3545' : '#666');
+    
+    // 领域分布
+    const sectorDiv = document.getElementById('sector-distribution');
+    const sectors = stats.sector_distribution || {};
+    sectorDiv.innerHTML = Object.entries(sectors).map(([sector, count]) => 
+        `<span style="background: #e9ecef; padding: 5px 12px; border-radius: 15px; font-size: 13px;">
+            ${sector} (${count})
+        </span>`
+    ).join('');
+}
+
+function displayNews(newsList) {
+    const newsListDiv = document.getElementById('news-list');
+    
+    if (!newsList || newsList.length === 0) {
+        newsListDiv.innerHTML = '<div style="text-align: center; color: #666; padding: 40px;">暂无新闻数据</div>';
+        return;
+    }
+    
+    newsListDiv.innerHTML = newsList.map(news => {
+        const sentiment = news.sentiment || 0;
+        const sentimentColor = sentiment > 0.2 ? '#28a745' : (sentiment < -0.2 ? '#dc3545' : '#6c757d');
+        const sentimentText = sentiment > 0.2 ? '正面' : (sentiment < -0.2 ? '负面' : '中性');
+        
+        return `
+            <div style="border: 1px solid #eee; border-radius: 8px; padding: 15px; margin-bottom: 15px; transition: box-shadow 0.2s;" 
+                 onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'" 
+                 onmouseout="this.style.boxShadow='none'">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                    <h4 style="margin: 0; flex: 1; font-size: 16px; color: #333;">${escapeHtml(news.title)}</h4>
+                    <span style="background: ${sentimentColor}20; color: ${sentimentColor}; padding: 3px 10px; border-radius: 12px; font-size: 12px; margin-left: 10px; white-space: nowrap;">
+                        ${sentimentText}
+                    </span>
+                </div>
+                <p style="margin: 8px 0; color: #666; font-size: 14px; line-height: 1.5;">
+                    ${escapeHtml(news.content ? news.content.substring(0, 200) + '...' : '')}
+                </p>
+                <div style="display: flex; gap: 20px; font-size: 12px; color: #888;">
+                    <span>📅 ${news.publish_time || '未知时间'}</span>
+                    <span>📍 ${news.source || '未知来源'}</span>
+                    <span>⭐ 重要性: ${((news.importance || 0.5) * 100).toFixed(0)}%</span>
+                    <span>📊 情感: ${sentiment.toFixed(2)}</span>
+                </div>
+                ${news.categories && news.categories.length > 0 ? `
+                    <div style="margin-top: 8px;">
+                        ${news.categories.map(cat => `<span style="background: #007bff20; color: #007bff; padding: 2px 8px; border-radius: 10px; font-size: 11px; margin-right: 5px;">${cat}</span>`).join('')}
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }).join('');
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// 页面加载时查询
+document.addEventListener('DOMContentLoaded', function() {
+    loadNews();
+});
+</script>
+{% endblock %}

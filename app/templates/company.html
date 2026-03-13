@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- 公司查询 -->
+<div class="card">
+    <h2>🏢 公司信息</h2>
+    
+    <div style="margin-bottom: 20px;">
+        <div style="display: flex; gap: 15px; align-items: flex-end;">
+            <div style="flex: 1;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">股票代码</label>
+                <input type="text" id="stock-code" placeholder="如: 600519" value="600519"
+                       style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+            <button onclick="loadCompanyInfo()" 
+                    style="padding: 10px 25px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                🔍 查询
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 公司基本信息 -->
+<div class="card" style="margin-top: 20px;" id="company-info-section">
+    <h3>📋 基本信息</h3>
+    <div id="company-info" style="margin-top: 15px;">
+        <div style="text-align: center; color: #666; padding: 40px;">请输入股票代码查询</div>
+    </div>
+</div>
+
+<!-- 业务分析 -->
+<div class="card" style="margin-top: 20px;" id="business-section" style="display: none;">
+    <h3>📊 业务分析</h3>
+    <div id="business-analysis" style="margin-top: 15px;"></div>
+</div>
+
+<!-- 财务指标 -->
+<div class="card" style="margin-top: 20px;" id="financial-section" style="display: none;">
+    <h3>💰 财务指标</h3>
+    <div id="financial-data" style="margin-top: 15px;"></div>
+</div>
+
+<!-- 相关股票 -->
+<div class="card" style="margin-top: 20px;" id="related-section" style="display: none;">
+    <h3>🔗 相关股票</h3>
+    <div id="related-stocks" style="margin-top: 15px;"></div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadCompanyInfo() {
+    const stockCode = document.getElementById('stock-code').value.trim();
+    if (!stockCode) {
+        alert('请输入股票代码');
+        return;
+    }
+    
+    const infoDiv = document.getElementById('company-info');
+    infoDiv.innerHTML = '<div style="text-align: center; padding: 40px;">⏳ 加载中...</div>';
+    
+    try {
+        // 并行请求
+        const [companyRes, relatedRes] = await Promise.all([
+            fetch(`/api/company/${stockCode}`),
+            fetch(`/api/analysis/related-stocks/${stockCode}`)
+        ]);
+        
+        const companyData = await companyRes.json();
+        const relatedData = await relatedRes.json();
+        
+        if (companyData.success) {
+            displayCompanyInfo(companyData.data);
+            if (relatedData.success) {
+                displayRelatedStocks(relatedData.data.related_stocks);
+            }
+        } else {
+            infoDiv.innerHTML = `<div style="text-align: center; color: #dc3545; padding: 40px;">❌ ${companyData.message}</div>`;
+        }
+    } catch (error) {
+        console.error('加载公司信息失败:', error);
+        infoDiv.innerHTML = '<div style="text-align: center; color: #dc3545; padding: 40px;">❌ 加载失败，请稍后重试</div>';
+    }
+}
+
+function displayCompanyInfo(data) {
+    const info = data.info || {};
+    const business = data.business || {};
+    const financial = data.financial || {};
+    
+    // 基本信息
+    document.getElementById('company-info').innerHTML = `
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="label">股票名称</div>
+                <div class="value">${info.name || '-'}</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">股票代码</div>
+                <div class="value">${info.code || '-'}</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">所属行业</div>
+                <div class="value">${info.industry || '-'}</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">所属板块</div>
+                <div class="value">${info.sector || '-'}</div>
+            </div>
+        </div>
+        <div style="margin-top: 20px;">
+            <h4 style="margin-bottom: 10px;">主营业务</h4>
+            <p style="color: #666; line-height: 1.6;">${info.business || '暂无信息'}</p>
+        </div>
+        ${info.concepts && info.concepts.length > 0 ? `
+            <div style="margin-top: 20px;">
+                <h4 style="margin-bottom: 10px;">概念标签</h4>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                    ${info.concepts.map(c => `<span style="background: #007bff20; color: #007bff; padding: 5px 12px; border-radius: 15px; font-size: 13px;">${c}</span>`).join('')}
+                </div>
+            </div>
+        ` : ''}
+    `;
+    
+    // 业务分析
+    if (business.industry_position) {
+        document.getElementById('business-section').style.display = 'block';
+        document.getElementById('business-analysis').innerHTML = `
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="label">行业地位</div>
+                    <div class="value">${business.industry_position?.position || '-'}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">成长潜力</div>
+                    <div class="value">${business.growth_potential?.potential || '-'}</div>
+                </div>
+            </div>
+            ${business.business_risk && business.business_risk.length > 0 ? `
+                <div style="margin-top: 15px;">
+                    <h4 style="margin-bottom: 10px;">⚠️ 风险提示</h4>
+                    <ul style="color: #856404; padding-left: 20px;">
+                        ${business.business_risk.map(r => `<li style="margin-bottom: 5px;">${r}</li>`).join('')}
+                    </ul>
+                </div>
+            ` : ''}
+            ${business.growth_potential?.drivers && business.growth_potential.drivers.length > 0 ? `
+                <div style="margin-top: 15px;">
+                    <h4 style="margin-bottom: 10px;">📈 增长驱动</h4>
+                    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                        ${business.growth_potential.drivers.map(d => `<span style="background: #28a74520; color: #28a745; padding: 5px 12px; border-radius: 15px; font-size: 13px;">${d}</span>`).join('')}
+                    </div>
+                </div>
+            ` : ''}
+        `;
+    }
+    
+    // 财务指标
+    if (financial.indicators && Object.keys(financial.indicators).length > 0) {
+        document.getElementById('financial-section').style.display = 'block';
+        const latestDate = Object.keys(financial.indicators)[0];
+        const latest = financial.indicators[latestDate];
+        
+        document.getElementById('financial-data').innerHTML = `
+            <div style="margin-bottom: 10px; color: #666; font-size: 13px;">最新报告期: ${latestDate}</div>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="label">ROE</div>
+                    <div class="value">${latest.roe ? latest.roe.toFixed(2) + '%' : '-'}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">毛利率</div>
+                    <div class="value">${latest.gross_margin ? latest.gross_margin.toFixed(2) + '%' : '-'}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">净利率</div>
+                    <div class="value">${latest.net_margin ? latest.net_margin.toFixed(2) + '%' : '-'}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">资产负债率</div>
+                    <div class="value">${latest.debt_ratio ? latest.debt_ratio.toFixed(2) + '%' : '-'}</div>
+                </div>
+            </div>
+        `;
+    }
+}
+
+function displayRelatedStocks(stocks) {
+    if (!stocks || stocks.length === 0) return;
+    
+    document.getElementById('related-section').style.display = 'block';
+    document.getElementById('related-stocks').innerHTML = `
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="background: #f8f9fa;">
+                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #dee2e6;">代码</th>
+                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #dee2e6;">名称</th>
+                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #dee2e6;">行业</th>
+                    <th style="padding: 10px; text-align: center; border-bottom: 2px solid #dee2e6;">相关性</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${stocks.map(s => `
+                    <tr style="border-bottom: 1px solid #eee;">
+                        <td style="padding: 10px;">${s.code}</td>
+                        <td style="padding: 10px;">${s.name}</td>
+                        <td style="padding: 10px;">${s.industry}</td>
+                        <td style="padding: 10px; text-align: center;">
+                            <span style="background: ${getCorrelationColor(s.correlation)}; color: white; padding: 3px 10px; border-radius: 10px; font-size: 12px;">
+                                ${(s.correlation * 100).toFixed(0)}%
+                            </span>
+                        </td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+}
+
+function getCorrelationColor(corr) {
+    if (corr >= 0.7) return '#28a745';
+    if (corr >= 0.5) return '#17a2b8';
+    if (corr >= 0.3) return '#ffc107';
+    return '#6c757d';
+}
+
+// 页面加载时查询默认股票
+document.addEventListener('DOMContentLoaded', function() {
+    loadCompanyInfo();
+});
+</script>
+{% endblock %}

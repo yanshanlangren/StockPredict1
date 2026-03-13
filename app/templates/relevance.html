@@ -1,0 +1,310 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- 相关性图谱 -->
+<div class="card">
+    <h2>🔗 相关性图谱</h2>
+    <p style="color: #666; margin-bottom: 20px;">展示股票与领域、概念的关联关系</p>
+    
+    <div style="margin-bottom: 20px;">
+        <div style="display: flex; gap: 15px; align-items: flex-end;">
+            <div style="flex: 1;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">股票代码</label>
+                <input type="text" id="stock-code" placeholder="如: 600519" value="600519"
+                       style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+            <button onclick="loadRelevanceGraph()" 
+                    style="padding: 10px 25px; background: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                🔍 生成图谱
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 相关性图谱可视化 -->
+<div class="card" style="margin-top: 20px;">
+    <h3>📊 关系图谱</h3>
+    <div id="graph-container" style="margin-top: 15px; min-height: 400px; background: #f8f9fa; border-radius: 8px; position: relative;">
+        <canvas id="graph-canvas" style="width: 100%; height: 400px;"></canvas>
+    </div>
+    <div style="margin-top: 15px; font-size: 13px; color: #666;">
+        💡 提示：节点大小表示重要性，连线粗细表示关联强度
+    </div>
+</div>
+
+<!-- 相关股票列表 -->
+<div class="card" style="margin-top: 20px;" id="related-section" style="display: none;">
+    <h3>📈 相关股票</h3>
+    <div id="related-stocks" style="margin-top: 15px;"></div>
+</div>
+
+<!-- 相关性矩阵 -->
+<div class="card" style="margin-top: 20px;" id="matrix-section" style="display: none;">
+    <h3>📊 相关性矩阵</h3>
+    <div id="relevance-matrix" style="margin-top: 15px; overflow-x: auto;"></div>
+</div>
+
+<!-- 产业链图谱 -->
+<div class="card" style="margin-top: 20px;" id="chain-section" style="display: none;">
+    <h3>🔗 产业链图谱</h3>
+    <div id="industry-chain" style="margin-top: 15px;"></div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let graphData = null;
+
+async function loadRelevanceGraph() {
+    const stockCode = document.getElementById('stock-code').value.trim();
+    if (!stockCode) {
+        alert('请输入股票代码');
+        return;
+    }
+    
+    try {
+        const [graphRes, relatedRes, chainRes] = await Promise.all([
+            fetch(`/api/analysis/relevance-graph/${stockCode}`),
+            fetch(`/api/analysis/related-stocks/${stockCode}`),
+            fetch(`/api/company/${stockCode}`)
+        ]);
+        
+        const graphResult = await graphRes.json();
+        const relatedResult = await relatedRes.json();
+        const companyResult = await chainRes.json();
+        
+        if (graphResult.success) {
+            graphData = graphResult.data;
+            drawGraph(graphData);
+        }
+        
+        if (relatedResult.success) {
+            displayRelatedStocks(relatedResult.data.related_stocks);
+        }
+        
+        if (companyResult.success && companyResult.data.business) {
+            displayIndustryChain(companyResult.data.business);
+        }
+        
+    } catch (error) {
+        console.error('加载失败:', error);
+        alert('加载失败，请稍后重试');
+    }
+}
+
+function drawGraph(data) {
+    const canvas = document.getElementById('graph-canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // 设置canvas尺寸
+    const container = document.getElementById('graph-container');
+    canvas.width = container.clientWidth;
+    canvas.height = 400;
+    
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    const nodes = data.nodes || [];
+    const edges = data.edges || [];
+    
+    if (nodes.length === 0) {
+        ctx.fillStyle = '#666';
+        ctx.font = '16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('暂无图谱数据', canvas.width / 2, canvas.height / 2);
+        return;
+    }
+    
+    // 计算节点位置（简单的圆形布局）
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    const radius = Math.min(centerX, centerY) - 60;
+    
+    // 找出中心节点
+    const centerNode = nodes.find(n => n.id === data.center);
+    const otherNodes = nodes.filter(n => n.id !== data.center);
+    
+    // 设置中心节点位置
+    if (centerNode) {
+        centerNode.x = centerX;
+        centerNode.y = centerY;
+    }
+    
+    // 设置其他节点位置
+    otherNodes.forEach((node, i) => {
+        const angle = (2 * Math.PI * i) / otherNodes.length;
+        node.x = centerX + radius * Math.cos(angle);
+        node.y = centerY + radius * Math.sin(angle);
+    });
+    
+    // 绘制边
+    edges.forEach(edge => {
+        const source = nodes.find(n => n.id === edge.source);
+        const target = nodes.find(n => n.id === edge.target);
+        
+        if (source && target) {
+            ctx.beginPath();
+            ctx.moveTo(source.x, source.y);
+            ctx.lineTo(target.x, target.y);
+            ctx.strokeStyle = edge.type === 'stock-sector' ? 'rgba(0, 123, 255, 0.3)' : 'rgba(40, 167, 69, 0.3)';
+            ctx.lineWidth = edge.weight * 3;
+            ctx.stroke();
+        }
+    });
+    
+    // 绘制节点
+    nodes.forEach(node => {
+        const isCenter = node.id === data.center;
+        const size = node.size || 20;
+        
+        // 绘制节点圆形
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, size, 0, 2 * Math.PI);
+        
+        if (node.type === 'stock') {
+            ctx.fillStyle = isCenter ? '#007bff' : '#28a745';
+        } else {
+            ctx.fillStyle = '#ffc107';
+        }
+        ctx.fill();
+        
+        // 绘制边框
+        ctx.strokeStyle = isCenter ? '#0056b3' : '#fff';
+        ctx.lineWidth = isCenter ? 3 : 2;
+        ctx.stroke();
+        
+        // 绘制标签
+        ctx.fillStyle = '#333';
+        ctx.font = isCenter ? 'bold 14px sans-serif' : '12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(node.label, node.x, node.y + size + 15);
+    });
+    
+    // 图例
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'left';
+    
+    // 股票节点
+    ctx.beginPath();
+    ctx.arc(20, 20, 8, 0, 2 * Math.PI);
+    ctx.fillStyle = '#007bff';
+    ctx.fill();
+    ctx.fillStyle = '#333';
+    ctx.fillText('中心股票', 35, 24);
+    
+    // 相关股票
+    ctx.beginPath();
+    ctx.arc(120, 20, 8, 0, 2 * Math.PI);
+    ctx.fillStyle = '#28a745';
+    ctx.fill();
+    ctx.fillStyle = '#333';
+    ctx.fillText('相关股票', 135, 24);
+    
+    // 领域
+    ctx.beginPath();
+    ctx.arc(220, 20, 8, 0, 2 * Math.PI);
+    ctx.fillStyle = '#ffc107';
+    ctx.fill();
+    ctx.fillStyle = '#333';
+    ctx.fillText('领域/概念', 235, 24);
+}
+
+function displayRelatedStocks(stocks) {
+    if (!stocks || stocks.length === 0) {
+        document.getElementById('related-section').style.display = 'none';
+        return;
+    }
+    
+    document.getElementById('related-section').style.display = 'block';
+    document.getElementById('related-stocks').innerHTML = `
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="background: #f8f9fa;">
+                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #dee2e6;">代码</th>
+                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #dee2e6;">名称</th>
+                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #dee2e6;">行业</th>
+                    <th style="padding: 10px; text-align: center; border-bottom: 2px solid #dee2e6;">相关性</th>
+                    <th style="padding: 10px; text-align: center; border-bottom: 2px solid #dee2e6;">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${stocks.map(s => `
+                    <tr style="border-bottom: 1px solid #eee;">
+                        <td style="padding: 10px;">${s.code}</td>
+                        <td style="padding: 10px;">${s.name}</td>
+                        <td style="padding: 10px;">${s.industry}</td>
+                        <td style="padding: 10px; text-align: center;">
+                            <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
+                                <div style="width: 100px; height: 8px; background: #e9ecef; border-radius: 4px; overflow: hidden;">
+                                    <div style="width: ${s.correlation * 100}%; height: 100%; background: ${getCorrelationColor(s.correlation)};"></div>
+                                </div>
+                                <span style="font-size: 13px;">${(s.correlation * 100).toFixed(0)}%</span>
+                            </div>
+                        </td>
+                        <td style="padding: 10px; text-align: center;">
+                            <button onclick="viewStockGraph('${s.code}')" 
+                                    style="padding: 5px 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                                查看
+                            </button>
+                        </td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+}
+
+function displayIndustryChain(business) {
+    if (!business || !business.industry) {
+        document.getElementById('chain-section').style.display = 'none';
+        return;
+    }
+    
+    document.getElementById('chain-section').style.display = 'block';
+    
+    // 简化的产业链展示
+    document.getElementById('industry-chain').innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: stretch; gap: 20px;">
+            <div style="flex: 1; padding: 15px; background: #fff3cd; border-radius: 8px;">
+                <h4 style="margin: 0 0 10px 0; color: #856404;">上游</h4>
+                <ul style="margin: 0; padding-left: 20px; color: #666; font-size: 14px;">
+                    <li>原材料供应</li>
+                    <li>零部件生产</li>
+                </ul>
+            </div>
+            <div style="flex: 1; padding: 15px; background: #d4edda; border-radius: 8px;">
+                <h4 style="margin: 0 0 10px 0; color: #155724;">中游</h4>
+                <ul style="margin: 0; padding-left: 20px; color: #666; font-size: 14px;">
+                    <li>${business.industry || '生产制造'}</li>
+                    <li>${business.name || '公司主体'}</li>
+                </ul>
+            </div>
+            <div style="flex: 1; padding: 15px; background: #cce5ff; border-radius: 8px;">
+                <h4 style="margin: 0 0 10px 0; color: #004085;">下游</h4>
+                <ul style="margin: 0; padding-left: 20px; color: #666; font-size: 14px;">
+                    <li>销售渠道</li>
+                    <li>终端客户</li>
+                </ul>
+            </div>
+        </div>
+    `;
+}
+
+function getCorrelationColor(corr) {
+    if (corr >= 0.7) return '#28a745';
+    if (corr >= 0.5) return '#17a2b8';
+    if (corr >= 0.3) return '#ffc107';
+    return '#6c757d';
+}
+
+function viewStockGraph(code) {
+    document.getElementById('stock-code').value = code;
+    loadRelevanceGraph();
+}
+
+// 页面加载时生成默认图谱
+document.addEventListener('DOMContentLoaded', function() {
+    loadRelevanceGraph();
+});
+</script>
+{% endblock %}

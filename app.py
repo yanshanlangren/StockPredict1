@@ -15,6 +15,7 @@ import threading
 import subprocess
 from flask import Flask, render_template, jsonify, request
 import pandas as pd
+import numpy as np
 import json
 from datetime import datetime
 import logging
@@ -632,6 +633,302 @@ def predict_batch():
         
     except Exception as e:
         logger.error(f"批量预测失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+# ==================== 新闻相关API ====================
+
+@app.route('/news')
+def news_page():
+    """新闻查询页面"""
+    return render_template('news.html')
+
+@app.route('/api/news')
+def get_news():
+    """获取新闻列表"""
+    try:
+        stock_code = request.args.get('stock_code')
+        limit = request.args.get('limit', 50, type=int)
+        
+        from src.news_crawler import get_news_crawler
+        crawler = get_news_crawler()
+        
+        if not crawler.is_available():
+            return jsonify({
+                'success': False,
+                'message': '新闻爬虫不可用，请安装akshare'
+            }), 400
+        
+        news_list = crawler.get_news(stock_code=stock_code, limit=limit)
+        stats = crawler.get_news_statistics(news_list)
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'news': news_list,
+                'statistics': stats
+            }
+        })
+    except Exception as e:
+        logger.error(f"获取新闻失败: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+# ==================== 公司信息相关API ====================
+
+@app.route('/company')
+def company_page():
+    """公司信息页面"""
+    return render_template('company.html')
+
+@app.route('/api/company/<stock_code>')
+def get_company_info(stock_code):
+    """获取公司信息"""
+    try:
+        from src.company_info_engine import get_company_info_engine
+        engine = get_company_info_engine()
+        
+        company_info = engine.get_company_info(stock_code)
+        financial_data = engine.get_financial_data(stock_code)
+        business_analysis = engine.analyze_business_structure(stock_code)
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'info': company_info,
+                'financial': financial_data,
+                'business': business_analysis
+            }
+        })
+    except Exception as e:
+        logger.error(f"获取公司信息失败: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+@app.route('/api/company/<stock_code>/announcements')
+def get_company_announcements(stock_code):
+    """获取公司公告"""
+    try:
+        from src.company_info_engine import get_company_info_engine
+        engine = get_company_info_engine()
+        
+        announcements = engine.get_company_announcements(stock_code, limit=20)
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'announcements': announcements,
+                'total': len(announcements)
+            }
+        })
+    except Exception as e:
+        logger.error(f"获取公司公告失败: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+# ==================== 新闻影响分析 ====================
+
+@app.route('/analysis/news-impact')
+def news_impact_page():
+    """新闻影响分析页面"""
+    return render_template('news_impact.html')
+
+@app.route('/api/analysis/news-impact/<stock_code>')
+def analyze_news_impact(stock_code):
+    """分析新闻对股票的影响"""
+    try:
+        from src.news_crawler import get_news_crawler
+        from src.news_impact_analyzer import get_news_impact_analyzer
+        
+        crawler = get_news_crawler()
+        analyzer = get_news_impact_analyzer()
+        
+        # 获取相关新闻
+        news_list = crawler.get_news(stock_code=stock_code, limit=30)
+        
+        if not news_list:
+            return jsonify({
+                'success': True,
+                'data': {
+                    'stock_code': stock_code,
+                    'total_news': 0,
+                    'message': '暂无相关新闻'
+                }
+            })
+        
+        # 生成影响报告
+        report = analyzer.generate_impact_report(news_list, stock_code)
+        
+        return jsonify({
+            'success': True,
+            'data': report
+        })
+    except Exception as e:
+        logger.error(f"分析新闻影响失败: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+# ==================== 相关性图谱 ====================
+
+@app.route('/analysis/relevance')
+def relevance_page():
+    """相关性图谱页面"""
+    return render_template('relevance.html')
+
+@app.route('/api/analysis/relevance-graph/<stock_code>')
+def get_relevance_graph(stock_code):
+    """获取相关性图谱"""
+    try:
+        from src.relevance_graph import get_relevance_graph
+        graph = get_relevance_graph()
+        
+        graph_data = graph.get_stock_relevance_graph(stock_code, depth=2)
+        
+        return jsonify({
+            'success': True,
+            'data': graph_data
+        })
+    except Exception as e:
+        logger.error(f"获取相关性图谱失败: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+@app.route('/api/analysis/relevance-matrix')
+def get_relevance_matrix():
+    """获取相关性矩阵"""
+    try:
+        from src.relevance_graph import get_relevance_graph
+        graph = get_relevance_graph()
+        
+        stock_codes = request.args.getlist('stocks')
+        if not stock_codes:
+            stock_codes = None  # 使用默认股票列表
+        
+        matrix_data = graph.get_relevance_matrix(stock_codes)
+        
+        return jsonify({
+            'success': True,
+            'data': matrix_data
+        })
+    except Exception as e:
+        logger.error(f"获取相关性矩阵失败: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+@app.route('/api/analysis/related-stocks/<stock_code>')
+def get_related_stocks(stock_code):
+    """获取相关股票"""
+    try:
+        from src.relevance_graph import get_relevance_graph
+        graph = get_relevance_graph()
+        
+        related = graph.find_related_stocks(stock_code, top_n=10)
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'stock_code': stock_code,
+                'related_stocks': related
+            }
+        })
+    except Exception as e:
+        logger.error(f"获取相关股票失败: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+# ==================== 多模态预测 ====================
+
+@app.route('/api/predict/multimodal/<stock_code>', methods=['POST'])
+def predict_multimodal(stock_code):
+    """
+    多模态预测 - 融合新闻、技术指标、相关性
+    
+    请求参数:
+    {
+        "days": 100,        # 历史数据天数
+        "use_news": true,   # 是否使用新闻
+        "use_relevance": true  # 是否使用相关性
+    }
+    """
+    try:
+        from src.news_crawler import get_news_crawler
+        from src.news_impact_analyzer import get_news_impact_analyzer
+        from src.relevance_graph import get_relevance_graph
+        from src.multimodal_model import get_multimodal_predictor
+        
+        params = request.json or {}
+        days = params.get('days', 100)
+        use_news = params.get('use_news', True)
+        use_relevance = params.get('use_relevance', True)
+        
+        # 获取K线数据
+        df = data_manager.get_stock_kline(stock_code, days=days)
+        
+        if df.empty or len(df) < 60:
+            return jsonify({
+                'success': False,
+                'message': f'数据不足，至少需要60天数据（当前：{len(df) if not df.empty else 0}天）'
+            }), 400
+        
+        # 获取新闻
+        news_list = []
+        sector_impact = {}
+        if use_news:
+            crawler = get_news_crawler()
+            news_list = crawler.get_news(stock_code=stock_code, limit=20)
+            
+            analyzer = get_news_impact_analyzer()
+            sector_impact = analyzer.get_sector_impact_vector(news_list)
+        
+        # 获取相关性矩阵
+        relevance_matrix = None
+        stock_idx = 0
+        if use_relevance:
+            graph = get_relevance_graph()
+            matrix_data = graph.get_relevance_matrix()
+            relevance_matrix = np.array(matrix_data['matrix'])
+            
+            # 找到股票索引
+            stock_codes = matrix_data['stock_codes']
+            if stock_code in stock_codes:
+                stock_idx = stock_codes.index(stock_code)
+        
+        # 多模态预测
+        predictor = get_multimodal_predictor()
+        result = predictor.full_prediction(
+            stock_code=stock_code,
+            news_list=news_list,
+            kline_df=df,
+            sector_impact=sector_impact,
+            relevance_matrix=relevance_matrix,
+            stock_idx=stock_idx
+        )
+        
+        return jsonify({
+            'success': True,
+            'data': result
+        })
+        
+    except Exception as e:
+        logger.error(f"多模态预测失败: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({

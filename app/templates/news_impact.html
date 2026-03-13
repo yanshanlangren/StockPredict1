@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- 新闻影响分析 -->
+<div class="card">
+    <h2>📊 新闻影响分析</h2>
+    <p style="color: #666; margin-bottom: 20px;">分析新闻舆情对特定股票的影响程度和方向</p>
+    
+    <div style="margin-bottom: 20px;">
+        <div style="display: flex; gap: 15px; align-items: flex-end;">
+            <div style="flex: 1;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">股票代码</label>
+                <input type="text" id="stock-code" placeholder="如: 600519" value="600519"
+                       style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+            <button onclick="analyzeNewsImpact()" 
+                    style="padding: 10px 25px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                📈 分析影响
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 分析结果 -->
+<div id="analysis-result" style="display: none;">
+    <!-- 综合评估 -->
+    <div class="card" style="margin-top: 20px;">
+        <h3>🎯 综合评估</h3>
+        <div class="stats-grid" id="summary-stats"></div>
+    </div>
+    
+    <!-- 情感分布 -->
+    <div class="card" style="margin-top: 20px;">
+        <h3>📉 情感分布</h3>
+        <div id="sentiment-distribution" style="margin-top: 15px;"></div>
+    </div>
+    
+    <!-- 领域影响 -->
+    <div class="card" style="margin-top: 20px;">
+        <h3>🏭 领域影响分析</h3>
+        <div id="sector-impact" style="margin-top: 15px;"></div>
+    </div>
+    
+    <!-- 影响趋势 -->
+    <div class="card" style="margin-top: 20px;">
+        <h3>📈 影响趋势</h3>
+        <div id="impact-trend" style="margin-top: 15px;"></div>
+    </div>
+    
+    <!-- 主要影响新闻 -->
+    <div class="card" style="margin-top: 20px;">
+        <h3>📰 主要影响新闻</h3>
+        <div id="top-news" style="margin-top: 15px;"></div>
+    </div>
+    
+    <!-- 风险提示 -->
+    <div class="card" style="margin-top: 20px;" id="risk-section">
+        <h3>⚠️ 风险提示</h3>
+        <div id="risk-warnings" style="margin-top: 15px;"></div>
+    </div>
+    
+    <!-- 投资建议 -->
+    <div class="card" style="margin-top: 20px;" id="recommendation-section">
+        <h3>💡 投资建议</h3>
+        <div id="recommendation" style="margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 8px;"></div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function analyzeNewsImpact() {
+    const stockCode = document.getElementById('stock-code').value.trim();
+    if (!stockCode) {
+        alert('请输入股票代码');
+        return;
+    }
+    
+    document.getElementById('analysis-result').style.display = 'none';
+    
+    try {
+        const response = await fetch(`/api/analysis/news-impact/${stockCode}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            displayAnalysisResult(data.data);
+        } else {
+            alert('分析失败: ' + data.message);
+        }
+    } catch (error) {
+        console.error('分析失败:', error);
+        alert('分析失败，请稍后重试');
+    }
+}
+
+function displayAnalysisResult(result) {
+    document.getElementById('analysis-result').style.display = 'block';
+    
+    // 综合评估
+    const summary = result.summary || {};
+    const totalImpact = summary.total_impact || 0;
+    const sentimentColor = totalImpact > 0.2 ? '#28a745' : (totalImpact < -0.2 ? '#dc3545' : '#6c757d');
+    const sentimentText = summary.overall_sentiment === 'positive' ? '正面' : 
+                         (summary.overall_sentiment === 'negative' ? '负面' : '中性');
+    
+    document.getElementById('summary-stats').innerHTML = `
+        <div class="stat-card">
+            <div class="label">分析新闻数</div>
+            <div class="value">${summary.total_news || 0}</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">综合情感</div>
+            <div class="value" style="color: ${sentimentColor}">${sentimentText}</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">综合影响分</div>
+            <div class="value" style="color: ${sentimentColor}">${totalImpact.toFixed(3)}</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">分析时间</div>
+            <div class="value" style="font-size: 14px;">${result.report_time || '-'}</div>
+        </div>
+    `;
+    
+    // 情感分布
+    const sentiment = result.sentiment_distribution || {};
+    document.getElementById('sentiment-distribution').innerHTML = `
+        <div style="display: flex; gap: 20px; align-items: center;">
+            <div style="flex: 1; text-align: center; padding: 20px; background: #d4edda; border-radius: 8px;">
+                <div style="font-size: 24px; font-weight: bold; color: #28a745;">${sentiment.positive || 0}</div>
+                <div style="color: #155724; margin-top: 5px;">正面新闻</div>
+            </div>
+            <div style="flex: 1; text-align: center; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+                <div style="font-size: 24px; font-weight: bold; color: #6c757d;">${sentiment.neutral || 0}</div>
+                <div style="color: #495057; margin-top: 5px;">中性新闻</div>
+            </div>
+            <div style="flex: 1; text-align: center; padding: 20px; background: #f8d7da; border-radius: 8px;">
+                <div style="font-size: 24px; font-weight: bold; color: #dc3545;">${sentiment.negative || 0}</div>
+                <div style="color: #721c24; margin-top: 5px;">负面新闻</div>
+            </div>
+        </div>
+    `;
+    
+    // 领域影响
+    const sectorImpact = result.sector_impact || {};
+    const sectorEntries = Object.entries(sectorImpact).slice(0, 10);
+    document.getElementById('sector-impact').innerHTML = sectorEntries.length > 0 ? `
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="background: #f8f9fa;">
+                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #dee2e6;">领域</th>
+                    <th style="padding: 10px; text-align: center; border-bottom: 2px solid #dee2e6;">影响分数</th>
+                    <th style="padding: 10px; text-align: center; border-bottom: 2px solid #dee2e6;">影响方向</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${sectorEntries.map(([sector, impact]) => {
+                    const color = impact > 0.1 ? '#28a745' : (impact < -0.1 ? '#dc3545' : '#6c757d');
+                    const direction = impact > 0.1 ? '正面' : (impact < -0.1 ? '负面' : '中性');
+                    return `
+                        <tr style="border-bottom: 1px solid #eee;">
+                            <td style="padding: 10px;">${sector}</td>
+                            <td style="padding: 10px; text-align: center;">
+                                <span style="color: ${color}; font-weight: 500;">${impact.toFixed(3)}</span>
+                            </td>
+                            <td style="padding: 10px; text-align: center;">
+                                <span style="background: ${color}20; color: ${color}; padding: 3px 10px; border-radius: 10px; font-size: 12px;">
+                                    ${direction}
+                                </span>
+                            </td>
+                        </tr>
+                    `;
+                }).join('')}
+            </tbody>
+        </table>
+    ` : '<div style="color: #666;">暂无领域影响数据</div>';
+    
+    // 影响趋势
+    const trend = result.impact_trend || {};
+    const trendColor = trend.trend === 'improving' ? '#28a745' : (trend.trend === 'deteriorating' ? '#dc3545' : '#6c757d');
+    const trendIcon = trend.trend === 'improving' ? '📈' : (trend.trend === 'deteriorating' ? '📉' : '➡️');
+    document.getElementById('impact-trend').innerHTML = `
+        <div style="display: flex; align-items: center; gap: 15px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+            <span style="font-size: 32px;">${trendIcon}</span>
+            <div>
+                <div style="font-size: 18px; font-weight: 500; color: ${trendColor};">
+                    ${trend.trend === 'improving' ? '影响改善' : (trend.trend === 'deteriorating' ? '影响恶化' : '影响稳定')}
+                </div>
+                <div style="color: #666; margin-top: 5px;">${trend.description || ''}</div>
+            </div>
+        </div>
+    `;
+    
+    // 主要影响新闻
+    const topNews = result.top_impacts || [];
+    document.getElementById('top-news').innerHTML = topNews.length > 0 ? `
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+            ${topNews.map(news => {
+                const impactColor = news.impact_score > 0.1 ? '#28a745' : (news.impact_score < -0.1 ? '#dc3545' : '#6c757d');
+                return `
+                    <div style="border-left: 4px solid ${impactColor}; padding: 12px 15px; background: #f8f9fa; border-radius: 0 8px 8px 0;">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div style="flex: 1;">
+                                <div style="font-weight: 500; margin-bottom: 5px;">${escapeHtml(news.news_title)}</div>
+                                <div style="font-size: 12px; color: #666;">
+                                    影响分数: <span style="color: ${impactColor}; font-weight: 500;">${news.impact_score.toFixed(3)}</span>
+                                    | 预期变化: <span style="color: ${impactColor};">${news.expected_change_pct}%</span>
+                                    | 持续天数: ${news.duration_days}天
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    ` : '<div style="color: #666;">暂无影响新闻数据</div>';
+    
+    // 风险提示
+    const risks = result.risk_warnings || [];
+    document.getElementById('risk-section').style.display = risks.length > 0 ? 'block' : 'none';
+    document.getElementById('risk-warnings').innerHTML = risks.length > 0 ? `
+        <ul style="color: #856404; padding-left: 20px; margin: 0;">
+            ${risks.map(r => `<li style="margin-bottom: 8px;">${r}</li>`).join('')}
+        </ul>
+    ` : '';
+    
+    // 投资建议
+    document.getElementById('recommendation').innerHTML = `
+        <div style="font-size: 16px; color: #333;">
+            💡 ${result.recommendation || '建议结合技术面综合判断'}
+        </div>
+    `;
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// 页面加载时分析默认股票
+document.addEventListener('DOMContentLoaded', function() {
+    analyzeNewsImpact();
+});
+</script>
+{% endblock %}
