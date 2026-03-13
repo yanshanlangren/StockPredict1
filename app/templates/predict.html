@@ -195,12 +195,18 @@ async function startBatchPredict() {
             })
         });
         
+        // 检查响应类型
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            throw new Error('服务器返回了非JSON响应，可能发生了内部错误。请刷新页面后重试。');
+        }
+        
         const data = await response.json();
         
         if (data.success) {
             displayResults(data.data, holdDays);
         } else {
-            throw new Error(data.message);
+            throw new Error(data.message || '预测失败');
         }
     } catch (error) {
         console.error('预测失败:', error);

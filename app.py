@@ -49,6 +49,35 @@ app = Flask(__name__,
             template_folder='app/templates',
             static_folder='app/static')
 
+# 全局错误处理 - 确保所有错误返回JSON
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """处理所有未捕获的异常"""
+    logger.error(f"未处理的异常: {e}")
+    import traceback
+    traceback.print_exc()
+    return jsonify({
+        'success': False,
+        'message': f'服务器错误: {str(e)}',
+        'error_type': type(e).__name__
+    }), 500
+
+@app.errorhandler(404)
+def handle_404(e):
+    """处理404错误"""
+    return jsonify({
+        'success': False,
+        'message': '请求的资源不存在'
+    }), 404
+
+@app.errorhandler(500)
+def handle_500(e):
+    """处理500错误"""
+    return jsonify({
+        'success': False,
+        'message': '服务器内部错误'
+    }), 500
+
 # 初始化组件
 data_manager = None
 
