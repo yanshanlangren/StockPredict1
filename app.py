@@ -535,8 +535,8 @@ def predict_batch():
         
         logger.info(f"开始批量预测，top_n={top_n}, hold_days={hold_days}")
         
-        # 获取股票列表
-        stock_list = data_manager.get_stock_list(limit=200)  # 限制分析数量
+        # 获取股票列表（使用缓存中的全部股票）
+        stock_list = data_manager.get_stock_list()
         
         if stock_list.empty:
             return jsonify({
