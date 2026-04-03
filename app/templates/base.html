@@ -17,6 +17,7 @@
                 <a href="{{ url_for('stock_page') }}" class="nav-link {% if request.endpoint == 'stock_page' %}active{% endif %}">📊 单股信息</a>
                 <a href="{{ url_for('predict_page') }}" class="nav-link {% if request.endpoint == 'predict_page' %}active{% endif %}">🔮 批量预测</a>
                 <a href="{{ url_for('news_page') }}" class="nav-link {% if request.endpoint == 'news_page' %}active{% endif %}">📰 新闻中心</a>
+                <a href="{{ url_for('dataset_page') }}" class="nav-link {% if request.endpoint == 'dataset_page' %}active{% endif %}">🧱 数据工坊</a>
             </nav>
         </header>
 

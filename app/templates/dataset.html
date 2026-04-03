@@ -1,0 +1,392 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card dataset-hero">
+    <div class="dataset-hero-copy">
+        <div class="dataset-kicker">Offline Feature Pipeline</div>
+        <h2>🧱 数据工坊</h2>
+        <p class="dataset-hero-text">
+            这里管理离线训练数据集。页面会把行情缓存、新闻缓存和静态关联特征拼成
+            <code>stock_code + trade_date</code> 级别样本，供后续基线模型和回测直接使用。
+        </p>
+        <div class="dataset-tag-row">
+            <span class="dataset-tag">新功能：数据集构建</span>
+            <span class="dataset-tag">新接口：/api/dataset/build</span>
+            <span class="dataset-tag">新产物：model_dataset</span>
+        </div>
+    </div>
+    <div class="dataset-hero-side">
+        <div class="dataset-side-card warm">
+            <div class="dataset-side-label">数据口径</div>
+            <div class="dataset-side-value">T 日收盘后样本</div>
+        </div>
+        <div class="dataset-side-card cool">
+            <div class="dataset-side-label">新闻对齐</div>
+            <div class="dataset-side-value">收盘后归次日</div>
+        </div>
+    </div>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card" id="dataset-status-card">
+        <div class="label">数据集状态</div>
+        <div class="value" id="dataset-status-text">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">处理股票数</div>
+        <div class="value" id="dataset-stock-count">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">训练样本数</div>
+        <div class="value" id="dataset-sample-count">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">最近构建时间</div>
+        <div class="value dataset-time-value" id="dataset-build-time">-</div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>⚙️ 构建配置</h2>
+    <div class="dataset-form-grid">
+        <div class="form-group">
+            <label for="dataset-stocks">股票数量</label>
+            <input type="number" id="dataset-stocks" min="1" max="5000" value="80">
+        </div>
+        <div class="form-group">
+            <label for="dataset-days">历史天数</label>
+            <input type="number" id="dataset-days" min="80" max="1500" value="240">
+        </div>
+        <div class="form-group">
+            <label for="dataset-horizon">预测窗口</label>
+            <input type="number" id="dataset-horizon" min="1" max="20" value="5">
+        </div>
+        <div class="form-group">
+            <label for="dataset-threshold">标签阈值</label>
+            <input type="number" id="dataset-threshold" min="0" max="0.2" step="0.005" value="0.01">
+        </div>
+    </div>
+
+    <div class="dataset-toggle-row">
+        <label class="dataset-check">
+            <input type="checkbox" id="dataset-force-refresh">
+            <span>强制刷新行情缓存</span>
+        </label>
+        <label class="dataset-check">
+            <input type="checkbox" id="dataset-refresh-news">
+            <span>缓存缺失时抓取新闻</span>
+        </label>
+    </div>
+
+    <div class="dataset-note">
+        一期输出四份文件：<code>market_daily</code>、<code>news_raw</code>、
+        <code>news_daily_features</code>、<code>model_dataset</code>。如果环境缺少 parquet 依赖，会自动回退为 csv。
+    </div>
+
+    <button id="dataset-build-btn" class="btn btn-primary dataset-build-btn" onclick="startDatasetBuild()">
+        开始构建离线数据集
+    </button>
+
+    <div id="dataset-build-panel" class="dataset-build-panel" style="display: none;">
+        <div class="dataset-build-header">
+            <div>
+                <div class="dataset-build-title">构建进度</div>
+                <div class="dataset-build-message" id="dataset-build-message">准备中...</div>
+            </div>
+            <div class="dataset-build-percent" id="dataset-build-percent">0%</div>
+        </div>
+        <div class="dataset-progress-track">
+            <div class="dataset-progress-fill" id="dataset-progress-fill"></div>
+        </div>
+        <div class="dataset-build-detail" id="dataset-build-detail">等待任务启动...</div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>📦 输出文件</h2>
+    <div id="dataset-output-grid" class="dataset-output-grid">
+        <div class="loading">正在读取数据集信息</div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>🔎 样本预览</h2>
+    <div id="dataset-preview-empty" class="dataset-empty">
+        当前还没有可用的数据集样本。
+    </div>
+    <div id="dataset-preview-table-wrap" style="display: none; overflow-x: auto;">
+        <table class="table">
+            <thead>
+                <tr id="dataset-preview-head"></tr>
+            </thead>
+            <tbody id="dataset-preview-body"></tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let datasetPollTimer = null;
+let lastDatasetBuildEndTime = null;
+
+document.addEventListener('DOMContentLoaded', async function() {
+    await loadDatasetInfo();
+    await syncDatasetBuildStatus();
+    datasetPollTimer = setInterval(syncDatasetBuildStatus, 3000);
+});
+
+async function loadDatasetInfo() {
+    try {
+        const response = await fetch('/api/dataset/info');
+        const payload = await response.json();
+
+        if (!payload.success) {
+            throw new Error(payload.message || '读取数据集信息失败');
+        }
+
+        renderDatasetInfo(payload.data);
+    } catch (error) {
+        console.error('加载数据集信息失败:', error);
+        document.getElementById('dataset-status-text').textContent = '异常';
+        document.getElementById('dataset-output-grid').innerHTML =
+            `<div class="error">读取数据集信息失败: ${error.message}</div>`;
+    }
+}
+
+function renderDatasetInfo(data) {
+    const statusCard = document.getElementById('dataset-status-card');
+    const metadata = data.metadata || {};
+    const rowCounts = metadata.row_counts || {};
+
+    if (data.available) {
+        document.getElementById('dataset-status-text').textContent = '已生成';
+        statusCard.classList.add('positive');
+        document.getElementById('dataset-stock-count').textContent = metadata.processed_stocks ? metadata.processed_stocks.length : 0;
+        document.getElementById('dataset-sample-count').textContent = rowCounts.model_dataset || 0;
+        document.getElementById('dataset-build-time').textContent = formatDateTime(metadata.created_at);
+    } else {
+        document.getElementById('dataset-status-text').textContent = '未构建';
+        statusCard.classList.remove('positive');
+        document.getElementById('dataset-stock-count').textContent = 0;
+        document.getElementById('dataset-sample-count').textContent = 0;
+        document.getElementById('dataset-build-time').textContent = '-';
+    }
+
+    renderOutputs(data.outputs || [], rowCounts);
+    renderPreview(data.preview || { columns: [], rows: [] });
+}
+
+function renderOutputs(outputs, rowCounts) {
+    const grid = document.getElementById('dataset-output-grid');
+
+    if (!outputs.length) {
+        grid.innerHTML = `<div class="dataset-empty">当前没有输出文件。</div>`;
+        return;
+    }
+
+    grid.innerHTML = outputs.map(output => {
+        const rowCount = rowCounts[output.name] || 0;
+        return `
+            <div class="dataset-output-card ${output.exists ? 'ready' : 'missing'}">
+                <div class="dataset-output-top">
+                    <div class="dataset-output-name">${escapeHtml(output.name)}</div>
+                    <div class="dataset-output-state">${output.exists ? 'READY' : 'MISSING'}</div>
+                </div>
+                <div class="dataset-output-meta">行数: ${rowCount}</div>
+                <div class="dataset-output-meta">大小: ${formatBytes(output.size_bytes || 0)}</div>
+                <div class="dataset-output-meta">更新时间: ${output.modified_at ? formatDateTime(output.modified_at) : '-'}</div>
+                <div class="dataset-output-path" title="${escapeHtml(output.path || '')}">
+                    ${escapeHtml(output.path || '-')}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderPreview(preview) {
+    const empty = document.getElementById('dataset-preview-empty');
+    const wrap = document.getElementById('dataset-preview-table-wrap');
+    const head = document.getElementById('dataset-preview-head');
+    const body = document.getElementById('dataset-preview-body');
+
+    if (!preview.columns || !preview.columns.length || !preview.rows || !preview.rows.length) {
+        empty.style.display = 'block';
+        wrap.style.display = 'none';
+        return;
+    }
+
+    empty.style.display = 'none';
+    wrap.style.display = 'block';
+
+    head.innerHTML = preview.columns.map(column => `<th>${escapeHtml(column)}</th>`).join('');
+    body.innerHTML = preview.rows.map(row => `
+        <tr>
+            ${preview.columns.map(column => `<td>${formatCell(row[column])}</td>`).join('')}
+        </tr>
+    `).join('');
+}
+
+async function startDatasetBuild() {
+    const button = document.getElementById('dataset-build-btn');
+    const panel = document.getElementById('dataset-build-panel');
+
+    button.disabled = true;
+    button.textContent = '构建中...';
+    panel.style.display = 'block';
+    updateBuildPanel({
+        progress: 0,
+        message: '正在提交任务...',
+        detail: null
+    });
+
+    try {
+        const response = await fetch('/api/dataset/build', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                stocks: parseInt(document.getElementById('dataset-stocks').value || '80', 10),
+                days: parseInt(document.getElementById('dataset-days').value || '240', 10),
+                horizon: parseInt(document.getElementById('dataset-horizon').value || '5', 10),
+                label_threshold: parseFloat(document.getElementById('dataset-threshold').value || '0.01'),
+                force_refresh: document.getElementById('dataset-force-refresh').checked,
+                refresh_news: document.getElementById('dataset-refresh-news').checked
+            })
+        });
+
+        const payload = await response.json();
+        if (!response.ok || !payload.success) {
+            throw new Error(payload.message || '提交构建任务失败');
+        }
+
+        await syncDatasetBuildStatus();
+    } catch (error) {
+        console.error('启动数据集构建失败:', error);
+        updateBuildPanel({
+            progress: 0,
+            message: `启动失败: ${error.message}`,
+            detail: null
+        });
+        button.disabled = false;
+        button.textContent = '开始构建离线数据集';
+    }
+}
+
+async function syncDatasetBuildStatus() {
+    try {
+        const response = await fetch('/api/dataset/build/status');
+        const payload = await response.json();
+        if (!payload.success) {
+            return;
+        }
+
+        const status = payload.status || {};
+        const panel = document.getElementById('dataset-build-panel');
+        const button = document.getElementById('dataset-build-btn');
+
+        if (status.is_building || status.progress > 0 || status.error || status.end_time) {
+            panel.style.display = 'block';
+        }
+
+        updateBuildPanel(status);
+
+        if (status.is_building) {
+            button.disabled = true;
+            button.textContent = '构建中...';
+        } else {
+            button.disabled = false;
+            button.textContent = '开始构建离线数据集';
+
+            if (status.end_time && status.end_time !== lastDatasetBuildEndTime) {
+                lastDatasetBuildEndTime = status.end_time;
+                await loadDatasetInfo();
+            }
+        }
+    } catch (error) {
+        console.error('同步构建状态失败:', error);
+    }
+}
+
+function updateBuildPanel(status) {
+    const progress = status.progress || 0;
+    const message = status.message || '等待任务启动...';
+    const detail = status.detail || null;
+    const error = status.error || null;
+
+    document.getElementById('dataset-progress-fill').style.width = `${progress}%`;
+    document.getElementById('dataset-build-percent').textContent = `${progress}%`;
+    document.getElementById('dataset-build-message').textContent = message;
+
+    const detailEl = document.getElementById('dataset-build-detail');
+    if (error) {
+        detailEl.textContent = error;
+        detailEl.style.color = '#b42318';
+        return;
+    }
+
+    detailEl.style.color = '#5f6b7a';
+    if (detail && detail.processed && detail.total) {
+        detailEl.textContent = `当前进度: ${detail.processed}/${detail.total} | 最近处理: ${detail.stock_code || '-'}`;
+    } else if (detail && detail.processed_stocks !== undefined) {
+        detailEl.textContent = `已处理股票: ${detail.processed_stocks} | 样本数: ${(detail.row_counts && detail.row_counts.model_dataset) || 0}`;
+    } else {
+        detailEl.textContent = status.start_time ? `任务开始时间: ${formatDateTime(status.start_time)}` : '等待任务启动...';
+    }
+}
+
+function formatDateTime(value) {
+    if (!value) {
+        return '-';
+    }
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return value;
+    }
+
+    return date.toLocaleString('zh-CN', {
+        hour12: false
+    });
+}
+
+function formatBytes(bytes) {
+    if (!bytes) {
+        return '0 B';
+    }
+
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let size = bytes;
+    let unitIndex = 0;
+
+    while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024;
+        unitIndex += 1;
+    }
+
+    return `${size.toFixed(size >= 100 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function formatCell(value) {
+    if (value === null || value === undefined || value === '') {
+        return '-';
+    }
+
+    if (typeof value === 'number') {
+        return Number.isInteger(value) ? String(value) : value.toFixed(4);
+    }
+
+    return escapeHtml(String(value));
+}
+
+function escapeHtml(text) {
+    return String(text)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+}
+</script>
+{% endblock %}

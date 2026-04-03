@@ -24,6 +24,7 @@ import logging
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.data_source_manager import DataSourceManager, DataSource
+from config import PROCESSED_DATA_DIR
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -92,6 +93,20 @@ training_status = {
 }
 training_lock = threading.Lock()
 
+# 数据集构建状态管理
+dataset_build_status = {
+    'is_building': False,
+    'progress': 0,
+    'message': '',
+    'start_time': None,
+    'end_time': None,
+    'error': None,
+    'result': None,
+    'params': None,
+    'detail': None,
+}
+dataset_build_lock = threading.Lock()
+
 def init_components():
     """初始化系统组件"""
     global data_manager
@@ -104,6 +119,98 @@ def init_components():
     except Exception as e:
         logger.error(f"组件初始化失败: {e}")
         return False
+
+
+def _load_dataset_metadata():
+    """读取最近一次数据集构建元数据。"""
+    metadata_path = os.path.join(PROCESSED_DATA_DIR, 'dataset_metadata.json')
+
+    if not os.path.exists(metadata_path):
+        return None
+
+    try:
+        with open(metadata_path, 'r', encoding='utf-8') as file_obj:
+            return json.load(file_obj)
+    except Exception as e:
+        logger.error(f"读取数据集元数据失败: {e}")
+        return None
+
+
+def _load_dataset_preview(dataset_path, limit=5):
+    """读取模型数据集预览。"""
+    if not dataset_path or not os.path.exists(dataset_path):
+        return {
+            'columns': [],
+            'rows': []
+        }
+
+    try:
+        if dataset_path.endswith('.parquet'):
+            df = pd.read_parquet(dataset_path)
+        else:
+            df = pd.read_csv(dataset_path, nrows=limit)
+
+        preferred_columns = [
+            'stock_code', 'stock_name', 'trade_date', 'close',
+            'ret_5d', 'rsi', 'news_count', 'weighted_sentiment',
+            'news_impact_total', 'label_up_5d', 'future_ret_5d'
+        ]
+        preview_columns = [col for col in preferred_columns if col in df.columns]
+        if not preview_columns:
+            preview_columns = list(df.columns[:10])
+
+        preview_df = df[preview_columns].head(limit).copy()
+        for column in preview_df.columns:
+            if pd.api.types.is_datetime64_any_dtype(preview_df[column]):
+                preview_df[column] = preview_df[column].astype(str)
+
+        preview_df = preview_df.replace({np.nan: None})
+
+        return {
+            'columns': preview_columns,
+            'rows': json.loads(preview_df.to_json(orient='records', force_ascii=False))
+        }
+    except Exception as e:
+        logger.error(f"读取数据集预览失败: {e}")
+        return {
+            'columns': [],
+            'rows': []
+        }
+
+
+def _build_dataset_info():
+    """汇总数据集构建信息和输出文件状态。"""
+    metadata = _load_dataset_metadata()
+    if not metadata:
+        return {
+            'available': False,
+            'metadata': None,
+            'outputs': [],
+            'preview': {
+                'columns': [],
+                'rows': []
+            }
+        }
+
+    outputs = []
+    for name, path in metadata.get('paths', {}).items():
+        exists = bool(path and os.path.exists(path))
+        outputs.append({
+            'name': name,
+            'path': path,
+            'exists': exists,
+            'size_bytes': os.path.getsize(path) if exists else 0,
+            'modified_at': datetime.fromtimestamp(os.path.getmtime(path)).isoformat() if exists else None
+        })
+
+    preview = _load_dataset_preview(metadata.get('paths', {}).get('model_dataset'))
+
+    return {
+        'available': True,
+        'metadata': metadata,
+        'outputs': outputs,
+        'preview': preview
+    }
 
 # 在第一次请求时初始化组件
 @app.before_request
@@ -134,6 +241,12 @@ def news_page():
 def predict_page():
     """批量预测页面"""
     return render_template('predict.html')
+
+
+@app.route('/dataset')
+def dataset_page():
+    """离线数据集页面"""
+    return render_template('dataset.html')
 
 # ==================== API路由 ====================
 
@@ -315,6 +428,126 @@ def get_train_status():
     return jsonify({
         'success': True,
         'status': status
+    })
+
+
+@app.route('/api/dataset/info')
+def get_dataset_info():
+    """获取当前离线数据集信息。"""
+    return jsonify({
+        'success': True,
+        'data': _build_dataset_info()
+    })
+
+
+@app.route('/api/dataset/build/status')
+def get_dataset_build_status():
+    """获取离线数据集构建状态。"""
+    with dataset_build_lock:
+        status = dataset_build_status.copy()
+
+    return jsonify({
+        'success': True,
+        'status': status
+    })
+
+
+@app.route('/api/dataset/build', methods=['POST'])
+def build_dataset():
+    """启动离线数据集构建任务。"""
+    global dataset_build_status
+
+    with dataset_build_lock:
+        if dataset_build_status['is_building']:
+            return jsonify({
+                'success': False,
+                'message': '数据集正在构建中，请稍候...'
+            }), 400
+
+        params = request.json if request.json else {}
+        stocks = max(1, min(int(params.get('stocks', 50)), 5000))
+        days = max(80, min(int(params.get('days', 240)), 1500))
+        horizon = max(1, min(int(params.get('horizon', 5)), 20))
+        label_threshold = float(params.get('label_threshold', 0.01))
+        force_refresh = bool(params.get('force_refresh', False))
+        refresh_news = bool(params.get('refresh_news', False))
+
+        dataset_build_status = {
+            'is_building': True,
+            'progress': 0,
+            'message': '初始化数据集构建任务...',
+            'start_time': datetime.now().isoformat(),
+            'end_time': None,
+            'error': None,
+            'result': None,
+            'detail': None,
+            'params': {
+                'stocks': stocks,
+                'days': days,
+                'horizon': horizon,
+                'label_threshold': label_threshold,
+                'force_refresh': force_refresh,
+                'refresh_news': refresh_news
+            }
+        }
+
+    def update_dataset_progress(progress, message, extra=None):
+        global dataset_build_status
+        with dataset_build_lock:
+            dataset_build_status['progress'] = progress
+            dataset_build_status['message'] = message
+            dataset_build_status['detail'] = extra or None
+
+    def run_dataset_build():
+        global dataset_build_status
+
+        try:
+            from src.dataset_builder import DatasetBuilder
+
+            builder = DatasetBuilder()
+            result = builder.build(
+                stock_limit=stocks,
+                days=days,
+                future_horizon=horizon,
+                label_threshold=label_threshold,
+                force_refresh=force_refresh,
+                refresh_news=refresh_news,
+                progress_callback=update_dataset_progress
+            )
+
+            with dataset_build_lock:
+                dataset_build_status['is_building'] = False
+                dataset_build_status['progress'] = 100
+                dataset_build_status['message'] = '离线数据集已更新'
+                dataset_build_status['end_time'] = datetime.now().isoformat()
+                dataset_build_status['result'] = result
+                dataset_build_status['detail'] = {
+                    'processed_stocks': len(result.get('processed_stocks', [])),
+                    'row_counts': result.get('row_counts', {})
+                }
+        except Exception as e:
+            logger.error(f"数据集构建失败: {e}")
+            with dataset_build_lock:
+                dataset_build_status['is_building'] = False
+                dataset_build_status['error'] = str(e)
+                dataset_build_status['message'] = f'数据集构建失败: {str(e)}'
+                dataset_build_status['end_time'] = datetime.now().isoformat()
+
+    thread = threading.Thread(target=run_dataset_build)
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({
+        'success': True,
+        'message': '数据集构建已启动，请通过 /api/dataset/build/status 查看进度',
+        'params': {
+            'stocks': stocks,
+            'days': days,
+            'horizon': horizon,
+            'label_threshold': label_threshold,
+            'force_refresh': force_refresh,
+            'refresh_news': refresh_news
+        }
     })
 
 @app.route('/api/stocks')
@@ -755,4 +988,4 @@ if __name__ == '__main__':
     
     init_components()
     
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5001, debug=True)
