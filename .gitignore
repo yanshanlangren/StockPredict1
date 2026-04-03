@@ -42,9 +42,8 @@ venv.bak/
 logs/
 *.log
 
-# Data files (cache and raw data)
-data/cache/
-data/raw/*.csv
+# Data files
+data/
 !data/raw/.gitkeep
 
 # Models
