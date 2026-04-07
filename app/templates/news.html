@@ -41,6 +41,30 @@
     <div id="impact-content"></div>
 </div>
 
+<!-- 新闻日特征查询 -->
+<div class="card" style="margin-top: 20px;">
+    <h3>🧩 新闻日级特征查询</h3>
+    <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
+        <div style="width: 180px;">
+            <label style="display: block; margin-bottom: 5px; font-weight: 500;">股票代码</label>
+            <input type="text" id="feature-stock-code" placeholder="如: 600519"
+                   style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+        </div>
+        <div style="width: 200px;">
+            <label style="display: block; margin-bottom: 5px; font-weight: 500;">交易日（可选）</label>
+            <input type="date" id="feature-trade-date"
+                   style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+        </div>
+        <button onclick="queryNewsDailyFeatures()"
+                style="padding: 10px 25px; background: #16a34a; color: white; border: none; border-radius: 4px; cursor: pointer;">
+            查询新闻特征
+        </button>
+    </div>
+    <div id="news-feature-result" style="margin-top: 15px;">
+        <div style="color: #666;">输入股票代码后可查看最新或指定交易日的新闻聚合特征。</div>
+    </div>
+</div>
+
 <!-- 新闻统计 -->
 <div class="card" style="margin-top: 20px;" id="stats-section" style="display: none;">
     <h3>📊 新闻统计</h3>
@@ -293,6 +317,83 @@ function displayNews(newsList) {
             </div>
         `;
     }).join('');
+}
+
+async function queryNewsDailyFeatures() {
+    const stockCode = document.getElementById('feature-stock-code').value.trim();
+    const tradeDate = document.getElementById('feature-trade-date').value;
+    const resultEl = document.getElementById('news-feature-result');
+
+    if (!stockCode) {
+        resultEl.innerHTML = '<div style="color: #dc3545;">请输入股票代码</div>';
+        return;
+    }
+
+    resultEl.innerHTML = '<div style="color: #666;">⏳ 查询中...</div>';
+
+    try {
+        let url = `/api/features/news/${encodeURIComponent(stockCode)}`;
+        if (tradeDate) {
+            url += `?trade_date=${encodeURIComponent(tradeDate)}`;
+        }
+
+        const response = await fetch(url);
+        const payload = await response.json();
+        if (!response.ok || !payload.success) {
+            throw new Error(payload.message || '查询失败');
+        }
+
+        const data = payload.data || {};
+        if (!data.available) {
+            resultEl.innerHTML = `
+                <div style="padding: 12px; border-radius: 8px; background: #f8fafc; color: #334155;">
+                    ${escapeHtml(data.message || '暂无数据')}
+                </div>
+            `;
+            return;
+        }
+
+        const importantKeys = [
+            'news_count',
+            'avg_sentiment',
+            'weighted_sentiment',
+            'avg_importance',
+            'max_importance',
+            'positive_ratio',
+            'negative_ratio',
+            'source_count',
+            'news_impact_total'
+        ];
+        const features = data.features || {};
+        const cards = importantKeys
+            .filter(key => features[key] !== undefined && features[key] !== null)
+            .map(key => `
+                <div style="border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px;">
+                    <div style="font-size: 12px; color: #64748b;">${key}</div>
+                    <div style="font-size: 18px; font-weight: 700; color: #0f172a;">
+                        ${typeof features[key] === 'number' ? Number(features[key]).toFixed(4) : escapeHtml(String(features[key]))}
+                    </div>
+                </div>
+            `).join('');
+
+        resultEl.innerHTML = `
+            <div style="padding: 12px; border-radius: 8px; background: #f8fafc; margin-bottom: 12px;">
+                <div><strong>股票:</strong> ${escapeHtml(data.stock_code || stockCode)}</div>
+                <div><strong>交易日:</strong> ${escapeHtml(data.trade_date || '-')}</div>
+                <div><strong>特征数量:</strong> ${data.feature_count || 0}</div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px;">
+                ${cards || '<div style="color:#666;">暂无核心指标</div>'}
+            </div>
+            <details style="margin-top: 12px;">
+                <summary style="cursor: pointer; color: #2563eb;">查看完整原始特征 JSON</summary>
+                <pre style="margin-top: 8px; padding: 10px; background: #0f172a; color: #e2e8f0; border-radius: 8px; overflow-x: auto;">${escapeHtml(JSON.stringify(features, null, 2))}</pre>
+            </details>
+        `;
+    } catch (error) {
+        console.error('查询新闻特征失败:', error);
+        resultEl.innerHTML = `<div style="color: #dc3545;">❌ ${escapeHtml(error.message)}</div>`;
+    }
 }
 
 function escapeHtml(text) {

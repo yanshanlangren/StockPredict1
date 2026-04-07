@@ -12,6 +12,7 @@
         <div class="dataset-tag-row">
             <span class="dataset-tag">新功能：数据集构建</span>
             <span class="dataset-tag">新接口：/api/dataset/build</span>
+            <span class="dataset-tag">新接口：/api/model/train-baseline</span>
             <span class="dataset-tag">新产物：model_dataset</span>
         </div>
     </div>
@@ -43,6 +44,14 @@
     <div class="stat-card">
         <div class="label">最近构建时间</div>
         <div class="value dataset-time-value" id="dataset-build-time">-</div>
+    </div>
+    <div class="stat-card" id="baseline-status-card">
+        <div class="label">基线模型状态</div>
+        <div class="value" id="baseline-status-text">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">最新测试 AUC</div>
+        <div class="value" id="baseline-test-auc">-</div>
     </div>
 </div>
 
@@ -103,6 +112,193 @@
 </div>
 
 <div class="card">
+    <h2>🧠 基线训练配置</h2>
+    <div class="dataset-form-grid">
+        <div class="form-group">
+            <label for="baseline-model-type">模型类型</label>
+            <select id="baseline-model-type">
+                <option value="logistic">逻辑回归 (logistic)</option>
+                <option value="random_forest">随机森林 (random_forest)</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="baseline-topk">Top-K</label>
+            <input type="number" id="baseline-topk" min="1" max="200" value="20">
+        </div>
+        <div class="form-group">
+            <label for="baseline-valid-ratio">验证集比例</label>
+            <input type="number" id="baseline-valid-ratio" min="0.05" max="0.4" step="0.01" value="0.15">
+        </div>
+        <div class="form-group">
+            <label for="baseline-test-ratio">测试集比例</label>
+            <input type="number" id="baseline-test-ratio" min="0.05" max="0.4" step="0.01" value="0.15">
+        </div>
+    </div>
+    <div class="form-group">
+        <label for="baseline-dataset-path">数据集路径（可选）</label>
+        <input type="text" id="baseline-dataset-path" placeholder="默认使用 data/processed/model_dataset.(parquet|csv)">
+    </div>
+
+    <div class="dataset-note">
+        使用 <code>stock_code + trade_date</code> 级别样本训练结构化基线模型，输出模型文件和评估报告。
+    </div>
+
+    <button id="baseline-train-btn" class="btn btn-success dataset-build-btn" onclick="startBaselineTrain()">
+        开始训练结构化基线模型
+    </button>
+
+    <div id="baseline-train-panel" class="dataset-build-panel baseline-build-panel" style="display: none;">
+        <div class="dataset-build-header">
+            <div>
+                <div class="dataset-build-title">训练进度</div>
+                <div class="dataset-build-message" id="baseline-build-message">准备中...</div>
+            </div>
+            <div class="dataset-build-percent baseline-build-percent" id="baseline-build-percent">0%</div>
+        </div>
+        <div class="dataset-progress-track baseline-progress-track">
+            <div class="dataset-progress-fill baseline-progress-fill" id="baseline-progress-fill"></div>
+        </div>
+        <div class="dataset-build-detail" id="baseline-build-detail">等待任务启动...</div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>📈 最新基线评估</h2>
+    <div class="baseline-report-toolbar">
+        <button
+            id="baseline-raw-json-btn"
+            class="btn btn-primary baseline-json-btn"
+            onclick="openBaselineReportJson()"
+            disabled
+        >
+            查看最新报告原始 JSON
+        </button>
+    </div>
+    <div id="baseline-report-empty" class="dataset-empty">
+        当前还没有可用的基线模型评估结果。
+    </div>
+    <div id="baseline-report-wrap" style="display: none;">
+        <div id="baseline-report-meta" class="baseline-report-meta"></div>
+        <div id="baseline-metrics-grid" class="baseline-metrics-grid"></div>
+        <div id="baseline-top-features" class="baseline-top-features"></div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>🧪 离线评估</h2>
+    <div class="dataset-form-grid">
+        <div class="form-group">
+            <label for="eval-model-type">模型类型</label>
+            <select id="eval-model-type">
+                <option value="logistic">逻辑回归 (logistic)</option>
+                <option value="random_forest">随机森林 (random_forest)</option>
+                <option value="lightgbm">LightGBM (需安装 lightgbm)</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="eval-topk">Top-K</label>
+            <input type="number" id="eval-topk" min="1" max="200" value="20">
+        </div>
+        <div class="form-group">
+            <label for="eval-train-days">滚动训练天数</label>
+            <input type="number" id="eval-train-days" min="60" max="600" value="180">
+        </div>
+        <div class="form-group">
+            <label for="eval-valid-days">滚动验证天数</label>
+            <input type="number" id="eval-valid-days" min="10" max="180" value="30">
+        </div>
+        <div class="form-group">
+            <label for="eval-test-days">滚动测试天数</label>
+            <input type="number" id="eval-test-days" min="10" max="180" value="30">
+        </div>
+        <div class="form-group">
+            <label for="eval-step-days">滚动步长</label>
+            <input type="number" id="eval-step-days" min="5" max="120" value="20">
+        </div>
+        <div class="form-group">
+            <label for="eval-rolling-windows">滚动窗口数</label>
+            <input type="number" id="eval-rolling-windows" min="1" max="12" value="3">
+        </div>
+        <div class="form-group">
+            <label for="eval-dataset-path">数据集路径（可选）</label>
+            <input type="text" id="eval-dataset-path" placeholder="默认使用 data/processed/model_dataset">
+        </div>
+    </div>
+    <div class="dataset-action-row">
+        <button id="model-evaluate-btn" class="btn btn-primary" onclick="runOfflineEvaluation()">
+            运行离线评估
+        </button>
+        <button
+            id="model-evaluate-json-btn"
+            class="btn btn-success"
+            onclick="openEvaluationReportJson()"
+            disabled
+        >
+            查看最新评估原始 JSON
+        </button>
+    </div>
+    <div id="model-evaluate-result" class="dataset-empty" style="display: none;"></div>
+</div>
+
+<div class="card">
+    <h2>📉 截面回测</h2>
+    <div class="dataset-form-grid">
+        <div class="form-group">
+            <label for="backtest-model-type">模型类型</label>
+            <select id="backtest-model-type">
+                <option value="logistic">逻辑回归 (logistic)</option>
+                <option value="random_forest">随机森林 (random_forest)</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="backtest-feature-set">特征集合</label>
+            <select id="backtest-feature-set">
+                <option value="all_features">新闻+技术+静态特征</option>
+                <option value="technical_only">仅技术面特征</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="backtest-topn">Top-N</label>
+            <input type="number" id="backtest-topn" min="1" max="200" value="20">
+        </div>
+        <div class="form-group">
+            <label for="backtest-hold-days">持有天数</label>
+            <input type="number" id="backtest-hold-days" min="1" max="20" value="5">
+        </div>
+        <div class="form-group">
+            <label for="backtest-commission">手续费率</label>
+            <input type="number" id="backtest-commission" min="0" max="0.01" step="0.0001" value="0.0003">
+        </div>
+        <div class="form-group">
+            <label for="backtest-stamp-tax">印花税率(卖出)</label>
+            <input type="number" id="backtest-stamp-tax" min="0" max="0.01" step="0.0001" value="0.0010">
+        </div>
+        <div class="form-group">
+            <label for="backtest-slippage">滑点率</label>
+            <input type="number" id="backtest-slippage" min="0" max="0.01" step="0.0001" value="0.0002">
+        </div>
+        <div class="form-group">
+            <label for="backtest-dataset-path">数据集路径（可选）</label>
+            <input type="text" id="backtest-dataset-path" placeholder="默认使用 data/processed/model_dataset">
+        </div>
+    </div>
+    <div class="dataset-action-row">
+        <button id="backtest-run-btn" class="btn btn-primary" onclick="runCrossSectionBacktest()">
+            运行截面回测
+        </button>
+        <button
+            id="backtest-json-btn"
+            class="btn btn-success"
+            onclick="openBacktestReportJson()"
+            disabled
+        >
+            查看最新回测原始 JSON
+        </button>
+    </div>
+    <div id="backtest-result" class="dataset-empty" style="display: none;"></div>
+</div>
+
+<div class="card">
     <h2>📦 输出文件</h2>
     <div id="dataset-output-grid" class="dataset-output-grid">
         <div class="loading">正在读取数据集信息</div>
@@ -123,17 +319,118 @@
         </table>
     </div>
 </div>
+
+<div id="page-toast" class="page-toast"></div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-let datasetPollTimer = null;
+let statusPollTimer = null;
 let lastDatasetBuildEndTime = null;
+let lastBaselineTrainEndTime = null;
+let baselineStatusSyncInitialized = false;
+let toastTimer = null;
+let evaluateRunning = false;
+let backtestRunning = false;
+
+const OUTPUT_NAME_MAP = {
+    market_daily: '行情日线特征',
+    news_raw: '原始新闻明细',
+    news_daily_features: '新闻日级特征',
+    model_dataset: '模型训练样本集',
+    metadata: '元数据'
+};
+
+const COLUMN_NAME_MAP = {
+    stock_code: '股票代码',
+    stock_name: '股票名称',
+    trade_date: '交易日期',
+    date: '日期',
+    open: '开盘价',
+    high: '最高价',
+    low: '最低价',
+    close: '收盘价',
+    volume: '成交量',
+    change_pct: '涨跌幅',
+    ret_1d: '1日收益率',
+    ret_5d: '5日收益率',
+    ret_20d: '20日收益率',
+    vol_5d: '5日波动率',
+    vol_20d: '20日波动率',
+    rsi: 'RSI',
+    macd: 'MACD',
+    bb_position: '布林带位置',
+    ma5_gt_ma10: 'MA5高于MA10',
+    ma10_gt_ma20: 'MA10高于MA20',
+    volume_ratio: '量比',
+    news_count: '新闻数量',
+    weighted_sentiment: '加权情绪',
+    news_impact_total: '新闻影响总分',
+    news_impact_max: '新闻影响峰值',
+    news_title_hits: '标题关键词命中',
+    label_up_5d: '5日上涨标签',
+    future_ret_5d: '未来5日收益率'
+};
+
+const METRIC_NAME_MAP = {
+    samples: '样本数',
+    positive_ratio: '正样本占比',
+    accuracy: '准确率',
+    precision: '精确率',
+    recall: '召回率',
+    f1: 'F1 分数',
+    avg_precision: '平均精确率(AP)',
+    auc: 'AUC',
+    logloss: '对数损失',
+    topk_days: 'Top-K 覆盖交易日',
+    topk_avg_count: 'Top-K 平均股票数',
+    topk_hit_rate: 'Top-K 命中率',
+    topk_avg_future_return: 'Top-K 平均未来收益率'
+};
+
+const MODEL_TYPE_MAP = {
+    logistic: '逻辑回归',
+    random_forest: '随机森林'
+};
+
+const METRIC_PERCENT_KEYS = new Set([
+    'positive_ratio',
+    'accuracy',
+    'precision',
+    'recall',
+    'f1',
+    'avg_precision',
+    'auc',
+    'topk_hit_rate',
+    'topk_avg_future_return'
+]);
+
+const METRIC_INTEGER_KEYS = new Set(['samples', 'topk_days']);
+const METRIC_ORDER = [
+    'samples',
+    'positive_ratio',
+    'accuracy',
+    'precision',
+    'recall',
+    'f1',
+    'avg_precision',
+    'auc',
+    'logloss',
+    'topk_days',
+    'topk_avg_count',
+    'topk_hit_rate',
+    'topk_avg_future_return'
+];
 
 document.addEventListener('DOMContentLoaded', async function() {
     await loadDatasetInfo();
     await syncDatasetBuildStatus();
-    datasetPollTimer = setInterval(syncDatasetBuildStatus, 3000);
+    await syncBaselineTrainStatus();
+    await syncLatestReportButtons();
+    statusPollTimer = setInterval(async () => {
+        await syncDatasetBuildStatus();
+        await syncBaselineTrainStatus();
+    }, 3000);
 });
 
 async function loadDatasetInfo() {
@@ -146,11 +443,15 @@ async function loadDatasetInfo() {
         }
 
         renderDatasetInfo(payload.data);
+        renderBaselineReport(payload.data ? payload.data.baseline : null);
+        renderBaselineSummaryFromReport(payload.data ? payload.data.baseline : null);
+        updateBaselineRawJsonButton(payload.data ? payload.data.baseline : null);
     } catch (error) {
         console.error('加载数据集信息失败:', error);
         document.getElementById('dataset-status-text').textContent = '异常';
         document.getElementById('dataset-output-grid').innerHTML =
             `<div class="error">读取数据集信息失败: ${error.message}</div>`;
+        updateBaselineRawJsonButton(null);
     }
 }
 
@@ -190,8 +491,8 @@ function renderOutputs(outputs, rowCounts) {
         return `
             <div class="dataset-output-card ${output.exists ? 'ready' : 'missing'}">
                 <div class="dataset-output-top">
-                    <div class="dataset-output-name">${escapeHtml(output.name)}</div>
-                    <div class="dataset-output-state">${output.exists ? 'READY' : 'MISSING'}</div>
+                    <div class="dataset-output-name">${escapeHtml(getOutputLabel(output.name))}</div>
+                    <div class="dataset-output-state">${output.exists ? '已生成' : '缺失'}</div>
                 </div>
                 <div class="dataset-output-meta">行数: ${rowCount}</div>
                 <div class="dataset-output-meta">大小: ${formatBytes(output.size_bytes || 0)}</div>
@@ -219,12 +520,328 @@ function renderPreview(preview) {
     empty.style.display = 'none';
     wrap.style.display = 'block';
 
-    head.innerHTML = preview.columns.map(column => `<th>${escapeHtml(column)}</th>`).join('');
+    head.innerHTML = preview.columns
+        .map(column => `<th title="${escapeHtml(column)}">${escapeHtml(getColumnLabel(column))}</th>`)
+        .join('');
     body.innerHTML = preview.rows.map(row => `
         <tr>
             ${preview.columns.map(column => `<td>${formatCell(row[column])}</td>`).join('')}
         </tr>
     `).join('');
+}
+
+function renderBaselineSummaryFromReport(report) {
+    const statusCard = document.getElementById('baseline-status-card');
+    const statusText = document.getElementById('baseline-status-text');
+    const aucValue = document.getElementById('baseline-test-auc');
+
+    if (report && report.metrics && report.metrics.test) {
+        statusText.textContent = '已训练';
+        statusCard.classList.add('positive');
+        aucValue.textContent = formatMetricValue('auc', report.metrics.test.auc);
+    } else {
+        statusText.textContent = '未训练';
+        statusCard.classList.remove('positive');
+        aucValue.textContent = '-';
+    }
+}
+
+function renderBaselineReport(report) {
+    const empty = document.getElementById('baseline-report-empty');
+    const wrap = document.getElementById('baseline-report-wrap');
+    const meta = document.getElementById('baseline-report-meta');
+    const metricGrid = document.getElementById('baseline-metrics-grid');
+    const featureWrap = document.getElementById('baseline-top-features');
+
+    if (!report) {
+        empty.style.display = 'block';
+        wrap.style.display = 'none';
+        return;
+    }
+
+    empty.style.display = 'none';
+    wrap.style.display = 'block';
+
+    const split = report.split || {};
+    meta.innerHTML = `
+        <div class="baseline-meta-item"><span>训练时间</span><strong>${formatDateTime(report.created_at)}</strong></div>
+        <div class="baseline-meta-item"><span>模型类型</span><strong>${escapeHtml(getModelLabel(report.model_type))}</strong></div>
+        <div class="baseline-meta-item"><span>特征数量</span><strong>${report.feature_count || 0}</strong></div>
+        <div class="baseline-meta-item"><span>Top-K</span><strong>${report.top_k || '-'}</strong></div>
+        <div class="baseline-meta-item"><span>训练样本</span><strong>${split.train_samples || 0}</strong></div>
+        <div class="baseline-meta-item"><span>验证样本</span><strong>${split.valid_samples || 0}</strong></div>
+        <div class="baseline-meta-item"><span>测试样本</span><strong>${split.test_samples || 0}</strong></div>
+    `;
+
+    metricGrid.innerHTML = `
+        ${renderMetricSplitCard('验证集指标', report.metrics ? report.metrics.valid : null)}
+        ${renderMetricSplitCard('测试集指标', report.metrics ? report.metrics.test : null)}
+    `;
+
+    const topFeatures = (report.top_features || []).slice(0, 10);
+    if (!topFeatures.length) {
+        featureWrap.innerHTML = '<div class="dataset-empty">暂无特征重要性结果。</div>';
+        return;
+    }
+
+    featureWrap.innerHTML = `
+        <div class="baseline-feature-title">Top 10 特征重要性</div>
+        <div class="baseline-feature-grid">
+            ${topFeatures.map((item, idx) => `
+                <div class="baseline-feature-item">
+                    <span class="baseline-feature-rank">#${idx + 1}</span>
+                    <span class="baseline-feature-name" title="${escapeHtml(item.feature || '-')}">
+                        ${escapeHtml(getColumnLabel(item.feature || '-'))}
+                    </span>
+                    <span class="baseline-feature-score">${formatMetricValue('score', item.score)}</span>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function updateBaselineRawJsonButton(report) {
+    const button = document.getElementById('baseline-raw-json-btn');
+    if (!button) {
+        return;
+    }
+
+    const hasReport = !!report;
+    button.disabled = !hasReport;
+    button.title = hasReport ? '在新标签页中打开最新基线报告原始 JSON' : '暂无可查看报告';
+}
+
+function openBaselineReportJson() {
+    const button = document.getElementById('baseline-raw-json-btn');
+    if (!button || button.disabled) {
+        showToast('暂无可查看的基线报告', 'info');
+        return;
+    }
+
+    window.open('/api/model/train-baseline/report/latest', '_blank', 'noopener');
+}
+
+async function syncLatestReportButtons() {
+    try {
+        const [evalResp, backtestResp] = await Promise.all([
+            fetch('/api/model/evaluate/report/latest'),
+            fetch('/api/backtest/cross-section/report/latest')
+        ]);
+
+        document.getElementById('model-evaluate-json-btn').disabled = !evalResp.ok;
+        document.getElementById('backtest-json-btn').disabled = !backtestResp.ok;
+    } catch (error) {
+        console.error('同步最新报告按钮状态失败:', error);
+    }
+}
+
+async function runOfflineEvaluation() {
+    if (evaluateRunning) {
+        return;
+    }
+
+    const button = document.getElementById('model-evaluate-btn');
+    const resultEl = document.getElementById('model-evaluate-result');
+    evaluateRunning = true;
+    button.disabled = true;
+    button.textContent = '评估中...';
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = '<div class="loading">正在运行离线评估，请稍候</div>';
+
+    const datasetPath = document.getElementById('eval-dataset-path').value.trim();
+
+    try {
+        const response = await fetch('/api/model/evaluate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model_type: document.getElementById('eval-model-type').value,
+                top_k: parseInt(document.getElementById('eval-topk').value || '20', 10),
+                train_days: parseInt(document.getElementById('eval-train-days').value || '180', 10),
+                valid_days: parseInt(document.getElementById('eval-valid-days').value || '30', 10),
+                test_days: parseInt(document.getElementById('eval-test-days').value || '30', 10),
+                step_days: parseInt(document.getElementById('eval-step-days').value || '20', 10),
+                rolling_windows: parseInt(document.getElementById('eval-rolling-windows').value || '3', 10),
+                dataset_path: datasetPath || null
+            })
+        });
+
+        const payload = await response.json();
+        if (!response.ok || !payload.success) {
+            throw new Error(payload.message || '离线评估失败');
+        }
+
+        renderEvaluationResult(payload.data || {});
+        document.getElementById('model-evaluate-json-btn').disabled = false;
+        showToast('离线评估完成', 'success');
+    } catch (error) {
+        console.error('运行离线评估失败:', error);
+        resultEl.innerHTML = `<div class="error">离线评估失败: ${escapeHtml(error.message)}</div>`;
+        showToast(`离线评估失败：${error.message}`, 'error');
+    } finally {
+        evaluateRunning = false;
+        button.disabled = false;
+        button.textContent = '运行离线评估';
+    }
+}
+
+function renderEvaluationResult(data) {
+    const resultEl = document.getElementById('model-evaluate-result');
+    const holdout = data.holdout_results || {};
+    const techTest = holdout.technical_only ? (holdout.technical_only.test_metrics || {}) : {};
+    const fullTest = holdout.all_features ? (holdout.all_features.test_metrics || {}) : {};
+    const uplift = data.holdout_uplift_full_vs_tech || {};
+    const rolling = data.rolling_summary || {};
+
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = `
+        <div class="result-kv-grid">
+            <div class="result-kv-item"><span>技术面 AUC</span><strong>${formatMetricValue('auc', techTest.auc)}</strong></div>
+            <div class="result-kv-item"><span>全特征 AUC</span><strong>${formatMetricValue('auc', fullTest.auc)}</strong></div>
+            <div class="result-kv-item"><span>AUC 增量</span><strong>${formatSignedMetric('auc', uplift.auc)}</strong></div>
+            <div class="result-kv-item"><span>技术面 Top-K收益</span><strong>${formatMetricValue('topk_avg_future_return', techTest.topk_avg_future_return)}</strong></div>
+            <div class="result-kv-item"><span>全特征 Top-K收益</span><strong>${formatMetricValue('topk_avg_future_return', fullTest.topk_avg_future_return)}</strong></div>
+            <div class="result-kv-item"><span>Top-K收益增量</span><strong>${formatSignedMetric('topk_avg_future_return', uplift.topk_avg_future_return)}</strong></div>
+            <div class="result-kv-item"><span>滚动窗口数</span><strong>${rolling.windows || data.rolling_windows || 0}</strong></div>
+            <div class="result-kv-item"><span>滚动平均AUC增量</span><strong>${formatSignedMetric('auc', rolling.avg_uplift_auc)}</strong></div>
+            <div class="result-kv-item"><span>AUC正增量窗口</span><strong>${rolling.positive_auc_windows || 0}</strong></div>
+        </div>
+        <div class="dataset-output-path" style="margin-top: 12px;">
+            评估报告: ${escapeHtml(data.report_path || '-')}
+        </div>
+    `;
+}
+
+function openEvaluationReportJson() {
+    const button = document.getElementById('model-evaluate-json-btn');
+    if (!button || button.disabled) {
+        showToast('暂无可查看的评估报告', 'info');
+        return;
+    }
+    window.open('/api/model/evaluate/report/latest', '_blank', 'noopener');
+}
+
+async function runCrossSectionBacktest() {
+    if (backtestRunning) {
+        return;
+    }
+
+    const button = document.getElementById('backtest-run-btn');
+    const resultEl = document.getElementById('backtest-result');
+    backtestRunning = true;
+    button.disabled = true;
+    button.textContent = '回测中...';
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = '<div class="loading">正在运行截面回测，请稍候</div>';
+
+    const datasetPath = document.getElementById('backtest-dataset-path').value.trim();
+
+    try {
+        const response = await fetch('/api/backtest/cross-section', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model_type: document.getElementById('backtest-model-type').value,
+                feature_set: document.getElementById('backtest-feature-set').value,
+                top_n: parseInt(document.getElementById('backtest-topn').value || '20', 10),
+                hold_days: parseInt(document.getElementById('backtest-hold-days').value || '5', 10),
+                commission_rate: parseFloat(document.getElementById('backtest-commission').value || '0.0003'),
+                stamp_tax_rate: parseFloat(document.getElementById('backtest-stamp-tax').value || '0.001'),
+                slippage_rate: parseFloat(document.getElementById('backtest-slippage').value || '0.0002'),
+                dataset_path: datasetPath || null
+            })
+        });
+
+        const payload = await response.json();
+        if (!response.ok || !payload.success) {
+            throw new Error(payload.message || '截面回测失败');
+        }
+
+        renderBacktestResult(payload.data || {});
+        document.getElementById('backtest-json-btn').disabled = false;
+        showToast('截面回测完成', 'success');
+    } catch (error) {
+        console.error('运行截面回测失败:', error);
+        resultEl.innerHTML = `<div class="error">截面回测失败: ${escapeHtml(error.message)}</div>`;
+        showToast(`截面回测失败：${error.message}`, 'error');
+    } finally {
+        backtestRunning = false;
+        button.disabled = false;
+        button.textContent = '运行截面回测';
+    }
+}
+
+function renderBacktestResult(data) {
+    const resultEl = document.getElementById('backtest-result');
+    const summary = data.summary || {};
+    const split = data.split || {};
+    const sector = data.sector_distribution || {};
+    const topSectors = Object.entries(sector)
+        .sort((a, b) => (b[1] || 0) - (a[1] || 0))
+        .slice(0, 5)
+        .map(([name, value]) => `${name}:${(value * 100).toFixed(1)}%`)
+        .join(' | ');
+
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = `
+        <div class="result-kv-grid">
+            <div class="result-kv-item"><span>累计收益</span><strong>${formatMetricValue('topk_avg_future_return', summary.cumulative_return)}</strong></div>
+            <div class="result-kv-item"><span>年化收益</span><strong>${formatMetricValue('topk_avg_future_return', summary.annualized_return)}</strong></div>
+            <div class="result-kv-item"><span>最大回撤</span><strong>${formatMetricValue('topk_avg_future_return', summary.max_drawdown)}</strong></div>
+            <div class="result-kv-item"><span>胜率</span><strong>${formatMetricValue('accuracy', summary.win_rate)}</strong></div>
+            <div class="result-kv-item"><span>平均换手</span><strong>${formatMetricValue('accuracy', summary.avg_turnover)}</strong></div>
+            <div class="result-kv-item"><span>夏普近似</span><strong>${summary.sharpe_like !== undefined && summary.sharpe_like !== null ? Number(summary.sharpe_like).toFixed(4) : '-'}</strong></div>
+            <div class="result-kv-item"><span>训练样本</span><strong>${split.train_samples || 0}</strong></div>
+            <div class="result-kv-item"><span>测试样本</span><strong>${split.test_samples || 0}</strong></div>
+            <div class="result-kv-item"><span>净值点数</span><strong>${data.equity_curve_points || 0}</strong></div>
+        </div>
+        <div class="dataset-output-path" style="margin-top: 12px;">
+            回测报告: ${escapeHtml(data.report_path || '-')}
+        </div>
+        <div class="dataset-output-meta" style="margin-top: 6px;">
+            主要行业暴露: ${escapeHtml(topSectors || '暂无')}
+        </div>
+    `;
+}
+
+function openBacktestReportJson() {
+    const button = document.getElementById('backtest-json-btn');
+    if (!button || button.disabled) {
+        showToast('暂无可查看的回测报告', 'info');
+        return;
+    }
+    window.open('/api/backtest/cross-section/report/latest', '_blank', 'noopener');
+}
+
+function renderMetricSplitCard(title, metrics) {
+    if (!metrics) {
+        return `
+            <div class="baseline-split-card">
+                <div class="baseline-split-title">${title}</div>
+                <div class="dataset-empty">暂无指标数据</div>
+            </div>
+        `;
+    }
+
+    const rows = METRIC_ORDER
+        .filter(key => metrics[key] !== undefined && metrics[key] !== null)
+        .map(key => `
+            <div class="baseline-metric-row">
+                <span class="baseline-metric-name">${escapeHtml(METRIC_NAME_MAP[key] || key)}</span>
+                <span class="baseline-metric-value">${escapeHtml(formatMetricValue(key, metrics[key]))}</span>
+            </div>
+        `).join('');
+
+    return `
+        <div class="baseline-split-card">
+            <div class="baseline-split-title">${title}</div>
+            <div class="baseline-metric-list">${rows}</div>
+        </div>
+    `;
 }
 
 async function startDatasetBuild() {
@@ -274,6 +891,53 @@ async function startDatasetBuild() {
     }
 }
 
+async function startBaselineTrain() {
+    const button = document.getElementById('baseline-train-btn');
+    const panel = document.getElementById('baseline-train-panel');
+
+    button.disabled = true;
+    button.textContent = '训练中...';
+    panel.style.display = 'block';
+    updateBaselinePanel({
+        progress: 0,
+        message: '正在提交任务...'
+    });
+
+    const datasetPathInput = document.getElementById('baseline-dataset-path').value.trim();
+
+    try {
+        const response = await fetch('/api/model/train-baseline', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model_type: document.getElementById('baseline-model-type').value,
+                top_k: parseInt(document.getElementById('baseline-topk').value || '20', 10),
+                valid_ratio: parseFloat(document.getElementById('baseline-valid-ratio').value || '0.15'),
+                test_ratio: parseFloat(document.getElementById('baseline-test-ratio').value || '0.15'),
+                dataset_path: datasetPathInput || null
+            })
+        });
+
+        const payload = await response.json();
+        if (!response.ok || !payload.success) {
+            throw new Error(payload.message || '提交基线训练任务失败');
+        }
+
+        await syncBaselineTrainStatus();
+    } catch (error) {
+        console.error('启动基线训练失败:', error);
+        updateBaselinePanel({
+            progress: 0,
+            message: `启动失败: ${error.message}`,
+            error: error.message
+        });
+        button.disabled = false;
+        button.textContent = '开始训练结构化基线模型';
+    }
+}
+
 async function syncDatasetBuildStatus() {
     try {
         const response = await fetch('/api/dataset/build/status');
@@ -309,6 +973,76 @@ async function syncDatasetBuildStatus() {
     }
 }
 
+async function syncBaselineTrainStatus() {
+    try {
+        const response = await fetch('/api/model/train-baseline/status');
+        const payload = await response.json();
+        if (!payload.success) {
+            return;
+        }
+
+        const status = payload.status || {};
+        if (!baselineStatusSyncInitialized) {
+            baselineStatusSyncInitialized = true;
+            if (status.end_time) {
+                lastBaselineTrainEndTime = status.end_time;
+            }
+        }
+
+        const panel = document.getElementById('baseline-train-panel');
+        const button = document.getElementById('baseline-train-btn');
+        const statusCard = document.getElementById('baseline-status-card');
+        const statusText = document.getElementById('baseline-status-text');
+        const aucValue = document.getElementById('baseline-test-auc');
+
+        const hasRuntimeInfo = !!(
+            status.is_training ||
+            status.progress > 0 ||
+            status.error ||
+            status.end_time ||
+            status.start_time ||
+            status.result
+        );
+
+        if (hasRuntimeInfo) {
+            panel.style.display = 'block';
+            updateBaselinePanel(status);
+        }
+
+        if (status.is_training) {
+            button.disabled = true;
+            button.textContent = '训练中...';
+            statusCard.classList.remove('positive');
+            statusText.textContent = '训练中';
+        } else {
+            button.disabled = false;
+            button.textContent = '开始训练结构化基线模型';
+
+            if (status.error) {
+                statusCard.classList.remove('positive');
+                statusText.textContent = '训练失败';
+            } else if (status.result) {
+                statusCard.classList.add('positive');
+                statusText.textContent = '已训练';
+                const testMetrics = status.result.metrics ? status.result.metrics.test : null;
+                aucValue.textContent = testMetrics ? formatMetricValue('auc', testMetrics.auc) : '-';
+            }
+
+            if (status.end_time && status.end_time !== lastBaselineTrainEndTime) {
+                lastBaselineTrainEndTime = status.end_time;
+                await loadDatasetInfo();
+                if (status.error) {
+                    showToast(`基线训练失败：${status.error}`, 'error');
+                } else {
+                    showToast('基线训练完成，已自动刷新最新报告', 'success');
+                }
+            }
+        }
+    } catch (error) {
+        console.error('同步基线训练状态失败:', error);
+    }
+}
+
 function updateBuildPanel(status) {
     const progress = status.progress || 0;
     const message = status.message || '等待任务启动...';
@@ -334,6 +1068,79 @@ function updateBuildPanel(status) {
     } else {
         detailEl.textContent = status.start_time ? `任务开始时间: ${formatDateTime(status.start_time)}` : '等待任务启动...';
     }
+}
+
+function updateBaselinePanel(status) {
+    const progress = status.progress || 0;
+    const message = status.message || '等待任务启动...';
+    const error = status.error || null;
+    const result = status.result || null;
+
+    document.getElementById('baseline-progress-fill').style.width = `${progress}%`;
+    document.getElementById('baseline-build-percent').textContent = `${progress}%`;
+    document.getElementById('baseline-build-message').textContent = message;
+
+    const detailEl = document.getElementById('baseline-build-detail');
+    if (error) {
+        detailEl.textContent = error;
+        detailEl.style.color = '#b42318';
+        return;
+    }
+
+    detailEl.style.color = '#5f6b7a';
+    if (result && result.metrics && result.metrics.test) {
+        const testMetrics = result.metrics.test;
+        detailEl.textContent = `测试集 AUC: ${formatMetricValue('auc', testMetrics.auc)} | F1: ${formatMetricValue('f1', testMetrics.f1)}`;
+    } else {
+        detailEl.textContent = status.start_time ? `任务开始时间: ${formatDateTime(status.start_time)}` : '等待任务启动...';
+    }
+}
+
+function getOutputLabel(name) {
+    return OUTPUT_NAME_MAP[name] || name;
+}
+
+function getColumnLabel(column) {
+    return COLUMN_NAME_MAP[column] || column;
+}
+
+function getModelLabel(modelType) {
+    return MODEL_TYPE_MAP[modelType] || modelType || '-';
+}
+
+function formatMetricValue(metricKey, value) {
+    if (value === null || value === undefined || value === '') {
+        return '-';
+    }
+
+    if (typeof value !== 'number') {
+        return String(value);
+    }
+
+    if (METRIC_INTEGER_KEYS.has(metricKey)) {
+        return String(Math.round(value));
+    }
+
+    if (METRIC_PERCENT_KEYS.has(metricKey)) {
+        return `${(value * 100).toFixed(2)}%`;
+    }
+
+    return value.toFixed(4);
+}
+
+function formatSignedMetric(metricKey, value) {
+    if (value === null || value === undefined || value === '') {
+        return '-';
+    }
+
+    const numeric = Number(value);
+    if (Number.isNaN(numeric)) {
+        return String(value);
+    }
+
+    const sign = numeric > 0 ? '+' : '';
+    const formatted = formatMetricValue(metricKey, numeric);
+    return `${sign}${formatted}`;
 }
 
 function formatDateTime(value) {
@@ -387,6 +1194,24 @@ function escapeHtml(text) {
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
+}
+
+function showToast(message, type = 'success') {
+    const toast = document.getElementById('page-toast');
+    if (!toast) {
+        return;
+    }
+
+    toast.textContent = message;
+    toast.classList.remove('success', 'error', 'info', 'show');
+    toast.classList.add(type, 'show');
+
+    if (toastTimer) {
+        clearTimeout(toastTimer);
+    }
+    toastTimer = setTimeout(() => {
+        toast.classList.remove('show');
+    }, 3200);
 }
 </script>
 {% endblock %}

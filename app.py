@@ -24,7 +24,7 @@ import logging
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.data_source_manager import DataSourceManager, DataSource
-from config import PROCESSED_DATA_DIR
+from config import PROCESSED_DATA_DIR, RESULT_DIR
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -107,6 +107,19 @@ dataset_build_status = {
 }
 dataset_build_lock = threading.Lock()
 
+# 基线模型训练状态管理
+baseline_train_status = {
+    'is_training': False,
+    'progress': 0,
+    'message': '',
+    'start_time': None,
+    'end_time': None,
+    'error': None,
+    'result': None,
+    'params': None,
+}
+baseline_train_lock = threading.Lock()
+
 def init_components():
     """初始化系统组件"""
     global data_manager
@@ -180,6 +193,7 @@ def _load_dataset_preview(dataset_path, limit=5):
 
 def _build_dataset_info():
     """汇总数据集构建信息和输出文件状态。"""
+    baseline_report = _load_latest_baseline_report()
     metadata = _load_dataset_metadata()
     if not metadata:
         return {
@@ -189,7 +203,8 @@ def _build_dataset_info():
             'preview': {
                 'columns': [],
                 'rows': []
-            }
+            },
+            'baseline': baseline_report
         }
 
     outputs = []
@@ -209,8 +224,62 @@ def _build_dataset_info():
         'available': True,
         'metadata': metadata,
         'outputs': outputs,
-        'preview': preview
+        'preview': preview,
+        'baseline': baseline_report
     }
+
+
+def _load_latest_baseline_report():
+    """读取最近一次基线模型训练报告。"""
+    report_path = os.path.join(RESULT_DIR, 'structured_baseline_report_latest.json')
+    if not os.path.exists(report_path):
+        return None
+
+    try:
+        with open(report_path, 'r', encoding='utf-8') as file_obj:
+            return json.load(file_obj)
+    except Exception as e:
+        logger.error(f"读取基线报告失败: {e}")
+        return None
+
+
+def _resolve_processed_dataset_path(dataset_name: str):
+    """Resolve dataset file path from metadata or processed directory fallback."""
+    metadata = _load_dataset_metadata()
+    if metadata:
+        path = metadata.get('paths', {}).get(dataset_name)
+        if path and os.path.exists(path):
+            return path
+
+    parquet_path = os.path.join(PROCESSED_DATA_DIR, f'{dataset_name}.parquet')
+    csv_path = os.path.join(PROCESSED_DATA_DIR, f'{dataset_name}.csv')
+    if os.path.exists(parquet_path):
+        return parquet_path
+    if os.path.exists(csv_path):
+        return csv_path
+    return None
+
+
+def _load_dataframe_by_path(path: str):
+    """Load dataframe by file suffix."""
+    if not path or not os.path.exists(path):
+        return None
+    if path.endswith('.parquet'):
+        return pd.read_parquet(path)
+    return pd.read_csv(path)
+
+
+def _load_latest_json_report(filename: str):
+    """Load latest json report under results."""
+    report_path = os.path.join(RESULT_DIR, filename)
+    if not os.path.exists(report_path):
+        return None
+    try:
+        with open(report_path, 'r', encoding='utf-8') as file_obj:
+            return json.load(file_obj)
+    except Exception as e:
+        logger.error(f"读取报告失败 {filename}: {e}")
+        return None
 
 # 在第一次请求时初始化组件
 @app.before_request
@@ -429,6 +498,344 @@ def get_train_status():
         'success': True,
         'status': status
     })
+
+
+@app.route('/api/model/train-baseline/status')
+def get_baseline_train_status():
+    """获取结构化基线模型训练状态。"""
+    with baseline_train_lock:
+        status = baseline_train_status.copy()
+
+    return jsonify({
+        'success': True,
+        'status': status
+    })
+
+
+@app.route('/api/model/train-baseline/report/latest')
+def get_latest_baseline_report_raw():
+    """返回最新基线报告原始 JSON。"""
+    report = _load_latest_baseline_report()
+    if not report:
+        return jsonify({
+            'success': False,
+            'message': '暂无可用的基线评估报告'
+        }), 404
+
+    return app.response_class(
+        response=json.dumps(report, ensure_ascii=False, indent=2),
+        status=200,
+        mimetype='application/json'
+    )
+
+
+@app.route('/api/model/train-baseline', methods=['POST'])
+def train_baseline_model():
+    """启动结构化基线模型训练。"""
+    global baseline_train_status
+
+    with baseline_train_lock:
+        if baseline_train_status['is_training']:
+            return jsonify({
+                'success': False,
+                'message': '基线模型正在训练中，请稍候...'
+            }), 400
+
+        params = request.json if request.json else {}
+        try:
+            model_type = str(params.get('model_type', 'logistic')).strip().lower()
+            top_k = int(params.get('top_k', 20))
+            valid_ratio = float(params.get('valid_ratio', 0.15))
+            test_ratio = float(params.get('test_ratio', 0.15))
+            dataset_path = params.get('dataset_path', None)
+        except (TypeError, ValueError):
+            return jsonify({
+                'success': False,
+                'message': '参数格式错误，请检查 model_type/top_k/valid_ratio/test_ratio'
+            }), 400
+
+        if isinstance(dataset_path, str):
+            dataset_path = dataset_path.strip() or None
+
+        if model_type not in ['logistic', 'random_forest']:
+            return jsonify({
+                'success': False,
+                'message': 'model_type 只支持 logistic 或 random_forest'
+            }), 400
+
+        top_k = max(1, min(top_k, 200))
+        valid_ratio = max(0.05, min(valid_ratio, 0.4))
+        test_ratio = max(0.05, min(test_ratio, 0.4))
+
+        if valid_ratio + test_ratio >= 0.8:
+            return jsonify({
+                'success': False,
+                'message': 'valid_ratio + test_ratio 必须小于 0.8'
+            }), 400
+
+        baseline_train_status = {
+            'is_training': True,
+            'progress': 0,
+            'message': '初始化基线训练任务...',
+            'start_time': datetime.now().isoformat(),
+            'end_time': None,
+            'error': None,
+            'result': None,
+            'params': {
+                'model_type': model_type,
+                'top_k': top_k,
+                'valid_ratio': valid_ratio,
+                'test_ratio': test_ratio,
+                'dataset_path': dataset_path
+            }
+        }
+
+    def run_baseline_training():
+        global baseline_train_status
+
+        try:
+            from src.baseline_model import BaselineModelTrainer
+
+            with baseline_train_lock:
+                baseline_train_status['progress'] = 15
+                baseline_train_status['message'] = '正在加载离线数据集...'
+
+            trainer = BaselineModelTrainer(
+                dataset_path=dataset_path,
+                valid_ratio=valid_ratio,
+                test_ratio=test_ratio
+            )
+
+            with baseline_train_lock:
+                baseline_train_status['progress'] = 45
+                baseline_train_status['message'] = '正在训练结构化基线模型...'
+
+            report = trainer.run(model_type=model_type, top_k=top_k)
+
+            with baseline_train_lock:
+                baseline_train_status['is_training'] = False
+                baseline_train_status['progress'] = 100
+                baseline_train_status['message'] = '基线模型训练完成'
+                baseline_train_status['end_time'] = datetime.now().isoformat()
+                baseline_train_status['result'] = {
+                    'model_type': model_type,
+                    'report_path': report.get('report_path'),
+                    'latest_path': report.get('latest_path'),
+                    'metrics': report.get('metrics', {}),
+                    'model_files': report.get('model_files', {})
+                }
+        except Exception as e:
+            logger.error(f"基线训练失败: {e}")
+            with baseline_train_lock:
+                baseline_train_status['is_training'] = False
+                baseline_train_status['error'] = str(e)
+                baseline_train_status['message'] = f'基线训练失败: {str(e)}'
+                baseline_train_status['end_time'] = datetime.now().isoformat()
+
+    thread = threading.Thread(target=run_baseline_training)
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({
+        'success': True,
+        'message': '基线训练已启动，请通过 /api/model/train-baseline/status 查看进度',
+        'params': {
+            'model_type': model_type,
+            'top_k': top_k,
+            'valid_ratio': valid_ratio,
+            'test_ratio': test_ratio,
+            'dataset_path': dataset_path
+        }
+    })
+
+
+@app.route('/api/model/evaluate/report/latest')
+def get_latest_evaluation_report_raw():
+    """返回最新离线评估报告原始 JSON。"""
+    report = _load_latest_json_report('offline_evaluation_report_latest.json')
+    if not report:
+        return jsonify({
+            'success': False,
+            'message': '暂无可用的离线评估报告'
+        }), 404
+
+    return app.response_class(
+        response=json.dumps(report, ensure_ascii=False, indent=2),
+        status=200,
+        mimetype='application/json'
+    )
+
+
+@app.route('/api/model/evaluate', methods=['POST'])
+def run_offline_evaluation():
+    """运行离线时间切分评估。"""
+    params = request.json if request.json else {}
+
+    try:
+        model_type = str(params.get('model_type', 'logistic')).strip().lower()
+        top_k = int(params.get('top_k', 20))
+        train_ratio = float(params.get('train_ratio', 0.70))
+        valid_ratio = float(params.get('valid_ratio', 0.15))
+        test_ratio = float(params.get('test_ratio', 0.15))
+        train_days = int(params.get('train_days', 180))
+        valid_days = int(params.get('valid_days', 30))
+        test_days = int(params.get('test_days', 30))
+        step_days = int(params.get('step_days', 20))
+        rolling_windows = int(params.get('rolling_windows', 3))
+        dataset_path = params.get('dataset_path')
+    except (TypeError, ValueError):
+        return jsonify({
+            'success': False,
+            'message': '参数格式错误，请检查评估参数类型'
+        }), 400
+
+    if model_type not in ['logistic', 'random_forest', 'lightgbm']:
+        return jsonify({
+            'success': False,
+            'message': 'model_type 只支持 logistic / random_forest / lightgbm'
+        }), 400
+
+    if isinstance(dataset_path, str):
+        dataset_path = dataset_path.strip() or None
+
+    try:
+        from src.evaluator import OfflineEvaluator
+
+        evaluator = OfflineEvaluator(dataset_path=dataset_path)
+        report = evaluator.run(
+            model_type=model_type,
+            top_k=max(1, min(top_k, 200)),
+            train_ratio=train_ratio,
+            valid_ratio=valid_ratio,
+            test_ratio=test_ratio,
+            train_days=max(60, train_days),
+            valid_days=max(10, valid_days),
+            test_days=max(10, test_days),
+            step_days=max(5, step_days),
+            rolling_windows=max(1, min(rolling_windows, 12)),
+        )
+
+        return jsonify({
+            'success': True,
+            'message': '离线评估完成',
+            'data': {
+                'report_path': report.get('report_path'),
+                'latest_path': report.get('latest_path'),
+                'holdout_results': report.get('holdout_results', {}),
+                'holdout_uplift_full_vs_tech': report.get('holdout_uplift_full_vs_tech', {}),
+                'rolling_summary': report.get('rolling_summary', {}),
+                'rolling_windows': len(report.get('rolling_results', [])),
+            }
+        })
+    except ValueError as e:
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 400
+    except Exception as e:
+        logger.error(f"离线评估失败: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'离线评估失败: {str(e)}'
+        }), 500
+
+
+@app.route('/api/backtest/cross-section/report/latest')
+def get_latest_backtest_report_raw():
+    """返回最新截面回测报告原始 JSON。"""
+    report = _load_latest_json_report('cross_section_backtest_latest.json')
+    if not report:
+        return jsonify({
+            'success': False,
+            'message': '暂无可用的截面回测报告'
+        }), 404
+
+    return app.response_class(
+        response=json.dumps(report, ensure_ascii=False, indent=2),
+        status=200,
+        mimetype='application/json'
+    )
+
+
+@app.route('/api/backtest/cross-section', methods=['POST'])
+def run_cross_section_backtest():
+    """运行截面选股回测。"""
+    params = request.json if request.json else {}
+
+    try:
+        model_type = str(params.get('model_type', 'logistic')).strip().lower()
+        feature_set = str(params.get('feature_set', 'all_features')).strip().lower()
+        top_n = int(params.get('top_n', 20))
+        hold_days = int(params.get('hold_days', 5))
+        train_ratio = float(params.get('train_ratio', 0.70))
+        valid_ratio = float(params.get('valid_ratio', 0.15))
+        test_ratio = float(params.get('test_ratio', 0.15))
+        commission_rate = float(params.get('commission_rate', 0.0003))
+        stamp_tax_rate = float(params.get('stamp_tax_rate', 0.001))
+        slippage_rate = float(params.get('slippage_rate', 0.0002))
+        dataset_path = params.get('dataset_path')
+    except (TypeError, ValueError):
+        return jsonify({
+            'success': False,
+            'message': '参数格式错误，请检查回测参数类型'
+        }), 400
+
+    if model_type not in ['logistic', 'random_forest']:
+        return jsonify({
+            'success': False,
+            'message': 'model_type 只支持 logistic 或 random_forest'
+        }), 400
+
+    if feature_set not in ['all_features', 'technical_only']:
+        return jsonify({
+            'success': False,
+            'message': 'feature_set 只支持 all_features 或 technical_only'
+        }), 400
+
+    if isinstance(dataset_path, str):
+        dataset_path = dataset_path.strip() or None
+
+    try:
+        from src.backtest_engine import CrossSectionBacktestEngine
+
+        engine = CrossSectionBacktestEngine(dataset_path=dataset_path)
+        report = engine.run(
+            model_type=model_type,
+            feature_set=feature_set,
+            top_n=max(1, min(top_n, 200)),
+            hold_days=max(1, min(hold_days, 20)),
+            train_ratio=train_ratio,
+            valid_ratio=valid_ratio,
+            test_ratio=test_ratio,
+            commission_rate=max(0.0, commission_rate),
+            stamp_tax_rate=max(0.0, stamp_tax_rate),
+            slippage_rate=max(0.0, slippage_rate),
+        )
+
+        return jsonify({
+            'success': True,
+            'message': '截面回测完成',
+            'data': {
+                'report_path': report.get('report_path'),
+                'latest_path': report.get('latest_path'),
+                'summary': report.get('summary', {}),
+                'split': report.get('split', {}),
+                'sector_distribution': report.get('sector_distribution', {}),
+                'equity_curve_points': len(report.get('equity_curve', [])),
+                'holding_days': len(report.get('daily_holdings', [])),
+            }
+        })
+    except ValueError as e:
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 400
+    except Exception as e:
+        logger.error(f"截面回测失败: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'截面回测失败: {str(e)}'
+        }), 500
 
 
 @app.route('/api/dataset/info')
@@ -887,6 +1294,103 @@ def get_news():
         })
     except Exception as e:
         logger.error(f"获取新闻失败: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+
+@app.route('/api/features/news/<stock_code>')
+def get_news_daily_features(stock_code):
+    """查询某股某日新闻聚合特征。"""
+    try:
+        trade_date = request.args.get('trade_date')
+        normalized_code = str(stock_code).strip().zfill(6)
+
+        news_feature_path = _resolve_processed_dataset_path('news_daily_features')
+        if not news_feature_path:
+            return jsonify({
+                'success': False,
+                'message': '未找到 news_daily_features 数据集，请先构建数据集'
+            }), 404
+
+        df = _load_dataframe_by_path(news_feature_path)
+        if df is None or df.empty:
+            return jsonify({
+                'success': False,
+                'message': 'news_daily_features 数据为空'
+            }), 404
+
+        if 'stock_code' not in df.columns or 'trade_date' not in df.columns:
+            return jsonify({
+                'success': False,
+                'message': 'news_daily_features 缺少必要字段(stock_code/trade_date)'
+            }), 500
+
+        frame = df.copy()
+        frame['stock_code'] = frame['stock_code'].astype(str).str.zfill(6)
+        frame['trade_date'] = pd.to_datetime(frame['trade_date'], errors='coerce')
+        frame = frame.dropna(subset=['trade_date'])
+        frame = frame[frame['stock_code'] == normalized_code].sort_values('trade_date')
+
+        if frame.empty:
+            return jsonify({
+                'success': True,
+                'data': {
+                    'stock_code': normalized_code,
+                    'available': False,
+                    'message': '该股票在 news_daily_features 中暂无数据',
+                    'available_dates': []
+                }
+            })
+
+        if trade_date:
+            target_date = pd.to_datetime(trade_date, errors='coerce')
+            if pd.isna(target_date):
+                return jsonify({
+                    'success': False,
+                    'message': 'trade_date 格式错误，请使用 YYYY-MM-DD'
+                }), 400
+            target_date = target_date.normalize()
+            selected = frame[frame['trade_date'].dt.normalize() == target_date]
+            if selected.empty:
+                return jsonify({
+                    'success': True,
+                    'data': {
+                        'stock_code': normalized_code,
+                        'available': False,
+                        'message': f'{target_date.date()} 无新闻特征数据',
+                        'available_dates': frame['trade_date'].dt.strftime('%Y-%m-%d').tail(60).tolist()
+                    }
+                })
+            row = selected.iloc[-1]
+        else:
+            row = frame.iloc[-1]
+
+        def to_plain(value):
+            if pd.isna(value):
+                return None
+            if isinstance(value, pd.Timestamp):
+                return value.isoformat()
+            if isinstance(value, np.generic):
+                return value.item()
+            return value
+
+        record = {key: to_plain(value) for key, value in row.to_dict().items()}
+        return jsonify({
+            'success': True,
+            'data': {
+                'stock_code': normalized_code,
+                'available': True,
+                'dataset_path': news_feature_path,
+                'trade_date': row['trade_date'].strftime('%Y-%m-%d'),
+                'feature_count': len(record),
+                'features': record,
+                'available_dates': frame['trade_date'].dt.strftime('%Y-%m-%d').tail(60).tolist()
+            }
+        })
+    except Exception as e:
+        logger.error(f"查询新闻特征失败: {e}")
         return jsonify({
             'success': False,
             'message': str(e)
