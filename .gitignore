@@ -54,7 +54,7 @@ models/*.json
 !models/.gitkeep
 
 # Results
-results/*.csv
+results/
 !results/.gitkeep
 
 # OS
