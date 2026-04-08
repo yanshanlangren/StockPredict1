@@ -126,6 +126,34 @@ baseline_train_status = {
 }
 baseline_train_lock = threading.Lock()
 
+# 全量行情更新状态管理
+market_update_status = {
+    'is_running': False,
+    'progress': 0,
+    'message': '',
+    'start_time': None,
+    'end_time': None,
+    'error': None,
+    'result': None,
+    'params': None,
+    'detail': None,
+}
+market_update_lock = threading.Lock()
+
+# 全源新闻同步状态管理
+news_sync_status = {
+    'is_running': False,
+    'progress': 0,
+    'message': '',
+    'start_time': None,
+    'end_time': None,
+    'error': None,
+    'result': None,
+    'params': None,
+    'detail': None,
+}
+news_sync_lock = threading.Lock()
+
 def init_components():
     """初始化系统组件"""
     global data_manager
@@ -1444,6 +1472,334 @@ def get_stocks():
             'success': False,
             'message': str(e)
         }), 500
+
+
+@app.route('/api/system/market-update/status')
+def get_market_update_status():
+    """获取全量行情更新任务状态。"""
+    with market_update_lock:
+        status = market_update_status.copy()
+
+    return jsonify({
+        'success': True,
+        'status': status
+    })
+
+
+@app.route('/api/system/market-update', methods=['POST'])
+def start_market_update():
+    """后台更新全部股票行情缓存（截至今日）。"""
+    global market_update_status
+
+    with market_update_lock:
+        if market_update_status['is_running']:
+            return jsonify({
+                'success': False,
+                'message': '全量行情更新任务正在运行中，请稍候...'
+            }), 400
+
+        params = request.json if request.json else {}
+        days = max(120, min(int(params.get('days', 400)), 2500))
+
+        refresh_stock_list_raw = params.get('refresh_stock_list', True)
+        if isinstance(refresh_stock_list_raw, str):
+            refresh_stock_list = refresh_stock_list_raw.strip().lower() in {'1', 'true', 'yes', 'y', 'on'}
+        else:
+            refresh_stock_list = bool(refresh_stock_list_raw)
+
+        market_update_status = {
+            'is_running': True,
+            'progress': 0,
+            'message': '初始化全量行情更新任务...',
+            'start_time': datetime.now().isoformat(),
+            'end_time': None,
+            'error': None,
+            'result': None,
+            'detail': None,
+            'params': {
+                'days': days,
+                'refresh_stock_list': refresh_stock_list
+            }
+        }
+
+    def update_market_status(progress, message, detail=None):
+        global market_update_status
+        with market_update_lock:
+            market_update_status['progress'] = progress
+            market_update_status['message'] = message
+            market_update_status['detail'] = detail or None
+
+    def run_market_update():
+        global market_update_status
+        try:
+            if data_manager is None:
+                raise RuntimeError('数据源管理器未初始化')
+
+            update_market_status(5, '正在拉取股票列表...')
+            stock_df = data_manager.get_stock_list(force_refresh=refresh_stock_list)
+            if stock_df is None or stock_df.empty:
+                raise ValueError('未获取到股票列表，无法执行全量行情更新')
+            if 'code' not in stock_df.columns:
+                raise ValueError('股票列表缺少 code 字段')
+
+            codes = stock_df['code'].astype(str).str.zfill(6).tolist()
+            total = len(codes)
+            success_count = 0
+            fail_count = 0
+            failed_codes = []
+            latest_trade_date = None
+
+            for idx, stock_code in enumerate(codes, 1):
+                try:
+                    df = data_manager.get_stock_kline(stock_code, days=days, force_refresh=True)
+                    if df is not None and not df.empty:
+                        success_count += 1
+                        last_dt = df.index[-1]
+                        if hasattr(last_dt, 'strftime'):
+                            last_date_str = last_dt.strftime('%Y-%m-%d')
+                            if latest_trade_date is None or last_date_str > latest_trade_date:
+                                latest_trade_date = last_date_str
+                    else:
+                        fail_count += 1
+                        if len(failed_codes) < 30:
+                            failed_codes.append(stock_code)
+                except Exception as stock_error:
+                    logger.warning(f"更新股票 {stock_code} 行情失败: {stock_error}")
+                    fail_count += 1
+                    if len(failed_codes) < 30:
+                        failed_codes.append(stock_code)
+
+                progress = 10 + int(idx / max(total, 1) * 88)
+                update_market_status(
+                    min(progress, 98),
+                    f'更新行情进度 {idx}/{total}（当前: {stock_code}）',
+                    {
+                        'current': idx,
+                        'total': total,
+                        'current_stock': stock_code,
+                        'success_count': success_count,
+                        'fail_count': fail_count,
+                        'latest_trade_date': latest_trade_date,
+                    }
+                )
+
+            result = {
+                'total_stocks': total,
+                'success_count': success_count,
+                'fail_count': fail_count,
+                'failed_codes_preview': failed_codes,
+                'latest_trade_date': latest_trade_date,
+                'updated_at': datetime.now().isoformat(),
+                'target_date': datetime.now().strftime('%Y-%m-%d'),
+            }
+
+            with market_update_lock:
+                market_update_status['is_running'] = False
+                market_update_status['progress'] = 100
+                market_update_status['message'] = '全量行情更新完成'
+                market_update_status['end_time'] = datetime.now().isoformat()
+                market_update_status['result'] = result
+                market_update_status['detail'] = {
+                    'current': total,
+                    'total': total,
+                    'success_count': success_count,
+                    'fail_count': fail_count,
+                    'latest_trade_date': latest_trade_date,
+                }
+        except Exception as e:
+            logger.error(f"全量行情更新失败: {e}")
+            with market_update_lock:
+                market_update_status['is_running'] = False
+                market_update_status['error'] = str(e)
+                market_update_status['message'] = f'全量行情更新失败: {str(e)}'
+                market_update_status['end_time'] = datetime.now().isoformat()
+
+    thread = threading.Thread(target=run_market_update)
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({
+        'success': True,
+        'message': '全量行情更新任务已启动，请通过 /api/system/market-update/status 查看进度',
+        'params': {
+            'days': days,
+            'refresh_stock_list': refresh_stock_list
+        }
+    })
+
+
+@app.route('/api/system/news-sync/status')
+def get_news_sync_status():
+    """获取全源新闻同步任务状态。"""
+    with news_sync_lock:
+        status = news_sync_status.copy()
+
+    return jsonify({
+        'success': True,
+        'status': status
+    })
+
+
+@app.route('/api/system/news-sync', methods=['POST'])
+def start_news_sync():
+    """后台同步全部新闻源数据。"""
+    global news_sync_status
+
+    with news_sync_lock:
+        if news_sync_status['is_running']:
+            return jsonify({
+                'success': False,
+                'message': '全源新闻同步任务正在运行中，请稍候...'
+            }), 400
+
+        params = request.json if request.json else {}
+        limit_per_source = max(50, min(int(params.get('limit_per_source', 300)), 2000))
+        requested_sources = params.get('sources')
+        default_sources = ['eastmoney', 'sina', 'tencent']
+        if isinstance(requested_sources, list) and requested_sources:
+            allowed = {'eastmoney', 'sina', 'tencent'}
+            sources = [str(item).strip().lower() for item in requested_sources if str(item).strip().lower() in allowed]
+            if not sources:
+                sources = default_sources
+        else:
+            sources = default_sources
+
+        news_sync_status = {
+            'is_running': True,
+            'progress': 0,
+            'message': '初始化全源新闻同步任务...',
+            'start_time': datetime.now().isoformat(),
+            'end_time': None,
+            'error': None,
+            'result': None,
+            'detail': None,
+            'params': {
+                'sources': sources,
+                'limit_per_source': limit_per_source
+            }
+        }
+
+    def update_news_status(progress, message, detail=None):
+        global news_sync_status
+        with news_sync_lock:
+            news_sync_status['progress'] = progress
+            news_sync_status['message'] = message
+            news_sync_status['detail'] = detail or None
+
+    def run_news_sync():
+        global news_sync_status
+        try:
+            from src.news_crawler import get_news_crawler
+
+            crawler = get_news_crawler()
+            if not crawler.is_available():
+                raise RuntimeError('新闻爬虫不可用，请先安装或启用 akshare')
+
+            source_counts = {}
+            all_news_items = []
+            total_sources = len(sources)
+
+            for idx, source in enumerate(sources, 1):
+                begin_progress = 5 + int((idx - 1) / max(total_sources, 1) * 80)
+                update_news_status(
+                    begin_progress,
+                    f'正在同步 {source} 新闻源...',
+                    {
+                        'current_source': source,
+                        'source_index': idx,
+                        'source_total': total_sources,
+                        'source_counts': source_counts,
+                    }
+                )
+
+                try:
+                    fetched = crawler.get_news(
+                        stock_code=None,
+                        limit=limit_per_source,
+                        use_cache=False,
+                        source=source
+                    )
+                except Exception as source_error:
+                    logger.warning(f"同步新闻源 {source} 失败: {source_error}")
+                    fetched = []
+
+                source_counts[source] = len(fetched)
+                all_news_items.extend(fetched)
+
+                end_progress = 5 + int(idx / max(total_sources, 1) * 80)
+                update_news_status(
+                    end_progress,
+                    f'已完成 {source} 新闻源，同步 {len(fetched)} 条',
+                    {
+                        'current_source': source,
+                        'source_index': idx,
+                        'source_total': total_sources,
+                        'source_counts': source_counts,
+                    }
+                )
+
+            deduped = []
+            seen = set()
+            for item in all_news_items:
+                title = str(item.get('title', '')).strip()
+                publish_time = str(item.get('publish_time', '')).strip()
+                source_name = str(item.get('source', '')).strip()
+                news_id = str(item.get('news_id', '')).strip()
+                key = news_id or f'{title}|{publish_time}|{source_name}'
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                deduped.append(item)
+
+            deduped.sort(key=lambda x: str(x.get('publish_time', '')), reverse=True)
+
+            cache_file = os.path.join(crawler.cache_dir, 'news_all.json')
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(deduped, f, ensure_ascii=False, indent=2)
+
+            statistics = crawler.get_news_statistics(deduped)
+            result = {
+                'sources': sources,
+                'source_counts': source_counts,
+                'total_raw': len(all_news_items),
+                'total_unique': len(deduped),
+                'cache_file': cache_file,
+                'statistics': statistics,
+                'synced_at': datetime.now().isoformat(),
+            }
+
+            with news_sync_lock:
+                news_sync_status['is_running'] = False
+                news_sync_status['progress'] = 100
+                news_sync_status['message'] = '全源新闻同步完成'
+                news_sync_status['end_time'] = datetime.now().isoformat()
+                news_sync_status['result'] = result
+                news_sync_status['detail'] = {
+                    'source_index': total_sources,
+                    'source_total': total_sources,
+                    'source_counts': source_counts,
+                    'total_unique': len(deduped),
+                }
+        except Exception as e:
+            logger.error(f"全源新闻同步失败: {e}")
+            with news_sync_lock:
+                news_sync_status['is_running'] = False
+                news_sync_status['error'] = str(e)
+                news_sync_status['message'] = f'全源新闻同步失败: {str(e)}'
+                news_sync_status['end_time'] = datetime.now().isoformat()
+
+    thread = threading.Thread(target=run_news_sync)
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({
+        'success': True,
+        'message': '全源新闻同步任务已启动，请通过 /api/system/news-sync/status 查看进度',
+        'params': {
+            'sources': sources,
+            'limit_per_source': limit_per_source
+        }
+    })
 
 @app.route('/api/stock/<stock_code>')
 def get_stock_info(stock_code):
