@@ -7,30 +7,30 @@
     <!-- 模型状态提示 -->
     <div id="model-warning" style="display: none; margin-bottom: 20px; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
         <strong>⚠️ 模型未训练</strong>
-        <p style="margin: 5px 0 0 0;">请先在首页训练多模态模型后再进行预测。</p>
+        <p style="margin: 5px 0 0 0;">请先在“模型训练”页面完成多模态训练后再进行预测。</p>
     </div>
     
     <!-- 预测配置 -->
     <div style="margin-bottom: 20px;">
         <h3 style="margin: 0 0 15px 0; font-size: 16px;">⚙️ 预测配置</h3>
-        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px;">
-            <div>
-                <label style="display: block; margin-bottom: 5px; font-weight: 500;">分析股票数量</label>
-                <input type="number" id="analyze-count" value="100" min="10" max="5000" 
-                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                <small style="color: #888;">最多5000只</small>
-            </div>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px;">
             <div>
                 <label style="display: block; margin-bottom: 5px; font-weight: 500;">返回数量 (Top N)</label>
-                <input type="number" id="top-n" value="20" min="5" max="100" 
+                <input type="number" id="top-n" value="20" min="5" max="200" 
                        style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                <small style="color: #888;">展示收益率最高的N只</small>
+                <small style="color: #888;">按预期收益排序后返回</small>
             </div>
             <div>
-                <label style="display: block; margin-bottom: 5px; font-weight: 500;">持有天数</label>
-                <input type="number" id="hold-days" value="5" min="1" max="20" 
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">历史K线天数</label>
+                <input type="number" id="kline-days" value="120" min="60" max="600" 
                        style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                <small style="color: #888;">预测持有N天的收益</small>
+                <small style="color: #888;">用于技术特征计算</small>
+            </div>
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">每股新闻条数上限</label>
+                <input type="number" id="news-limit" value="20" min="1" max="100" 
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <small style="color: #888;">批量预测新闻融合上限</small>
             </div>
             <div>
                 <label style="display: block; margin-bottom: 5px; font-weight: 500;">最低价格 (元)</label>
@@ -38,18 +38,25 @@
                        style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                 <small style="color: #888;">过滤低价股</small>
             </div>
-            <div>
+            <div style="grid-column: span 2;">
                 <label style="display: block; margin-bottom: 5px; font-weight: 500;">最高价格 (元)</label>
                 <input type="number" id="max-price" value="1000" min="0" step="1"
                        style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                 <small style="color: #888;">过滤高价股</small>
             </div>
+            <div style="display: flex; align-items: flex-end; gap: 16px;">
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="checkbox" id="batch-use-news" checked> 融合新闻情感与领域影响
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="checkbox" id="batch-use-relevance" checked> 融合相关性矩阵
+                </label>
+            </div>
         </div>
         
         <!-- 时间预估 -->
         <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 4px; font-size: 13px; color: #666;">
-            ⏱️ 预估时间：<span id="estimated-time">约 30 秒</span>
-            <span style="margin-left: 15px;">💡 分析数量越多，预测越准确，但耗时更长</span>
+            ⏱️ 默认会扫描缓存中的全部股票；当前模型输出固定为未来 <strong>5</strong> 个交易日方向与收益预估。
         </div>
     </div>
     
@@ -76,7 +83,7 @@
         <h2>📊 预测结果</h2>
         
         <!-- 统计信息 -->
-        <div id="result-stats" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+        <div id="result-stats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 15px; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
         </div>
         
         <!-- 结果表格 -->
@@ -89,6 +96,7 @@
                         <th style="padding: 12px; text-align: left; border-bottom: 2px solid #dee2e6;">股票名称</th>
                         <th style="padding: 12px; text-align: right; border-bottom: 2px solid #dee2e6;">当前价格</th>
                         <th style="padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6;">预测方向</th>
+                        <th style="padding: 12px; text-align: right; border-bottom: 2px solid #dee2e6;">新闻条数</th>
                         <th style="padding: 12px; text-align: right; border-bottom: 2px solid #dee2e6;">预期收益</th>
                         <th style="padding: 12px; text-align: right; border-bottom: 2px solid #dee2e6;">置信度</th>
                         <th style="padding: 12px; text-align: right; border-bottom: 2px solid #dee2e6;">预测价格</th>
@@ -104,7 +112,7 @@
             <strong>💡 使用提示</strong>
             <ul style="margin: 10px 0 0 0; padding-left: 20px; color: #333;">
                 <li>预测结果基于多模态模型，融合新闻情感、技术指标和相关性分析</li>
-                <li id="hold-days-tip">预期收益为预测持有5个交易日后的收益率</li>
+                <li id="horizon-tip">预期收益为模型默认未来5日收益估计</li>
                 <li>置信度越高表示模型越确定预测方向</li>
                 <li>建议结合其他指标综合判断，不构成投资建议</li>
             </ul>
@@ -124,18 +132,6 @@
 
 {% block scripts %}
 <script>
-// 更新预估时间
-document.getElementById('analyze-count').addEventListener('input', function() {
-    const count = parseInt(this.value) || 100;
-    const seconds = Math.round(count * 0.3);
-    if (seconds < 60) {
-        document.getElementById('estimated-time').textContent = `约 ${seconds} 秒`;
-    } else {
-        const minutes = Math.round(seconds / 60);
-        document.getElementById('estimated-time').textContent = `约 ${minutes} 分钟`;
-    }
-});
-
 // 页面加载时检查模型状态
 document.addEventListener('DOMContentLoaded', async function() {
     await checkModelStatus();
@@ -161,23 +157,22 @@ async function checkModelStatus() {
 // 开始批量预测
 async function startBatchPredict() {
     const btn = document.getElementById('predict-btn');
-    const analyzeCount = document.getElementById('analyze-count').value;
     const topN = document.getElementById('top-n').value;
-    const holdDays = document.getElementById('hold-days').value;
+    const klineDays = document.getElementById('kline-days').value;
+    const newsLimit = document.getElementById('news-limit').value;
+    const useNews = document.getElementById('batch-use-news').checked;
+    const useRelevance = document.getElementById('batch-use-relevance').checked;
     const minPrice = document.getElementById('min-price').value;
     const maxPrice = document.getElementById('max-price').value;
-    
-    document.getElementById('hold-days-tip').textContent = 
-        `预期收益为预测持有${holdDays}个交易日后的收益率`;
-    
+
     btn.disabled = true;
     btn.textContent = '⏳ 预测中...';
     
     document.getElementById('predict-progress').style.display = 'block';
     document.getElementById('predict-results').style.display = 'none';
     document.getElementById('no-results').style.display = 'none';
-    document.getElementById('progress-message').textContent = '正在分析股票列表...';
-    document.getElementById('progress-detail').textContent = '已分析: 0 只股票';
+    document.getElementById('progress-message').textContent = '正在扫描缓存中的全部股票...';
+    document.getElementById('progress-detail').textContent = '正在融合新闻与技术特征';
     document.getElementById('progress-bar').style.width = '0%';
     
     try {
@@ -187,9 +182,11 @@ async function startBatchPredict() {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                analyze_count: parseInt(analyzeCount),
                 top_n: parseInt(topN),
-                hold_days: parseInt(holdDays),
+                kline_days: parseInt(klineDays),
+                news_limit: parseInt(newsLimit),
+                use_news: useNews,
+                use_relevance: useRelevance,
                 min_price: parseFloat(minPrice),
                 max_price: parseFloat(maxPrice)
             })
@@ -204,7 +201,7 @@ async function startBatchPredict() {
         const data = await response.json();
         
         if (data.success) {
-            displayResults(data.data, holdDays);
+            displayResults(data.data);
         } else {
             throw new Error(data.message || '预测失败');
         }
@@ -219,11 +216,13 @@ async function startBatchPredict() {
 }
 
 // 显示结果
-function displayResults(data, holdDays) {
-    const predictions = data.predictions;
+function displayResults(data) {
+    const predictions = Array.isArray(data.predictions) ? data.predictions : [];
     const totalAnalyzed = data.total_analyzed;
     const totalUp = data.up_count || 0;
     const totalDown = data.down_count || 0;
+    const totalCached = data.total_cached_stocks || 0;
+    const horizonDays = data.predict_horizon_days || (data.model_info && data.model_info.predict_horizon_days) || 5;
     
     if (predictions.length === 0) {
         document.getElementById('no-results').style.display = 'block';
@@ -231,14 +230,19 @@ function displayResults(data, holdDays) {
     }
     
     document.getElementById('predict-results').style.display = 'block';
+    document.getElementById('horizon-tip').textContent = `预期收益为模型默认未来${horizonDays}个交易日收益估计`;
     
     // 统计信息（显示全部分析股票的涨跌情况）
-    const topReturn = predictions.length > 0 ? predictions[0].expected_return : 0;
-    const avgConfidence = predictions.reduce((sum, p) => sum + p.confidence, 0) / predictions.length;
+    const topReturn = predictions.length > 0 ? Number(predictions[0].expected_return || 0) : 0;
+    const avgConfidence = predictions.reduce((sum, p) => sum + Number(p.confidence || 0), 0) / predictions.length;
     
     document.getElementById('result-stats').innerHTML = `
         <div style="text-align: center;">
-            <div style="font-size: 12px; color: #888;">分析股票数</div>
+            <div style="font-size: 12px; color: #888;">缓存股票总数</div>
+            <div style="font-size: 24px; font-weight: bold;">${totalCached}</div>
+        </div>
+        <div style="text-align: center;">
+            <div style="font-size: 12px; color: #888;">有效预测股票数</div>
             <div style="font-size: 24px; font-weight: bold;">${totalAnalyzed}</div>
         </div>
         <div style="text-align: center;">
@@ -263,6 +267,10 @@ function displayResults(data, holdDays) {
     const tbody = document.getElementById('result-table-body');
     tbody.innerHTML = predictions.map(p => {
         const isUp = p.prediction === 1;
+        const latestPrice = Number(p.latest_price || 0);
+        const expectedReturn = Number(p.expected_return || 0);
+        const confidence = Number(p.confidence || 0);
+        const predictedPrice = Number(p.predicted_price || 0);
         return `
             <tr style="border-bottom: 1px solid #eee;" 
                 onmouseover="this.style.background='#f8f9fa'" 
@@ -276,17 +284,18 @@ function displayResults(data, holdDays) {
                 </td>
                 <td style="padding: 12px; font-weight: 500;">${p.stock_code}</td>
                 <td style="padding: 12px;">${p.stock_name}</td>
-                <td style="padding: 12px; text-align: right;">${p.latest_price.toFixed(2)}</td>
+                <td style="padding: 12px; text-align: right;">${latestPrice.toFixed(2)}</td>
                 <td style="padding: 12px; text-align: center;">
                     <span style="color: ${isUp ? '#28a745' : '#dc3545'}; font-weight: 500;">
                         ${isUp ? '↑ 上涨' : '↓ 下跌'}
                     </span>
                 </td>
-                <td style="padding: 12px; text-align: right; color: ${p.expected_return >= 0 ? '#28a745' : '#dc3545'}; font-weight: 500;">
-                    ${p.expected_return >= 0 ? '+' : ''}${p.expected_return.toFixed(2)}%
+                <td style="padding: 12px; text-align: right;">${p.news_count || 0}</td>
+                <td style="padding: 12px; text-align: right; color: ${expectedReturn >= 0 ? '#28a745' : '#dc3545'}; font-weight: 500;">
+                    ${expectedReturn >= 0 ? '+' : ''}${expectedReturn.toFixed(2)}%
                 </td>
-                <td style="padding: 12px; text-align: right;">${(p.confidence * 100).toFixed(1)}%</td>
-                <td style="padding: 12px; text-align: right;">${p.predicted_price.toFixed(2)}</td>
+                <td style="padding: 12px; text-align: right;">${(confidence * 100).toFixed(1)}%</td>
+                <td style="padding: 12px; text-align: right;">${predictedPrice.toFixed(2)}</td>
             </tr>
         `;
     }).join('');

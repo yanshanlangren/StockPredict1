@@ -245,6 +245,30 @@ class BaselineModelTrainer:
                 ]
             )
 
+        if model_type == "lightgbm":
+            try:
+                from lightgbm import LGBMClassifier
+            except Exception as exc:
+                raise ValueError(
+                    "lightgbm 未安装，请安装后重试，或改用 logistic/random_forest"
+                ) from exc
+
+            estimator = LGBMClassifier(
+                n_estimators=300,
+                learning_rate=0.05,
+                num_leaves=31,
+                random_state=self.random_state,
+                subsample=0.9,
+                colsample_bytree=0.9,
+                min_child_samples=30,
+            )
+            return Pipeline(
+                steps=[
+                    ("imputer", SimpleImputer(strategy="median")),
+                    ("model", estimator),
+                ]
+            )
+
         raise ValueError(f"Unsupported model_type: {model_type}")
 
     def _evaluate_split(
@@ -415,7 +439,7 @@ def parse_args() -> argparse.Namespace:
         "--model-type",
         type=str,
         default="logistic",
-        choices=["logistic", "random_forest"],
+        choices=["logistic", "random_forest", "lightgbm"],
         help="Baseline model type",
     )
     parser.add_argument("--top-k", type=int, default=20, help="Top-k for return metrics")

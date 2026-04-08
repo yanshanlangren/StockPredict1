@@ -66,7 +66,7 @@
 </div>
 
 <!-- 新闻统计 -->
-<div class="card" style="margin-top: 20px;" id="stats-section" style="display: none;">
+<div class="card" id="stats-section" style="margin-top: 20px; display: none;">
     <h3>📊 新闻统计</h3>
     <div class="stats-grid" id="news-stats">
         <div class="stat-card">
@@ -115,6 +115,33 @@
 {% block scripts %}
 <script>
 let currentStockCode = '';
+
+const NEWS_FEATURE_LABEL_MAP = {
+    news_count: '新闻数量',
+    avg_sentiment: '平均情感',
+    weighted_sentiment: '加权情绪',
+    avg_importance: '平均重要性',
+    max_importance: '最大重要性',
+    positive_ratio: '正面占比',
+    negative_ratio: '负面占比',
+    source_count: '来源数量',
+    news_impact_total: '新闻影响总分'
+};
+
+const NEWS_FEATURE_PERCENT_KEYS = new Set([
+    'avg_importance',
+    'max_importance',
+    'positive_ratio',
+    'negative_ratio'
+]);
+
+const NEWS_SOURCE_LABEL_MAP = {
+    eastmoney: '东方财富',
+    sina: '新浪财经',
+    tencent: '腾讯财经',
+    all: '全部来源',
+    unknown: '未知来源'
+};
 
 async function loadNews() {
     const stockCode = document.getElementById('stock-code').value.trim();
@@ -272,7 +299,7 @@ function displayStatistics(stats) {
     const sources = stats.source_distribution || {};
     sourceDiv.innerHTML = Object.entries(sources).map(([source, count]) => 
         `<span style="background: #d4edda; color: #155724; padding: 5px 12px; border-radius: 15px; font-size: 13px;">
-            ${source} (${count})
+            ${escapeHtml(getNewsSourceLabel(source))} (${count})
         </span>`
     ).join('') || '<span style="color: #888;">暂无数据</span>';
 }
@@ -289,13 +316,17 @@ function displayNews(newsList) {
         const sentiment = news.sentiment || 0;
         const sentimentColor = sentiment > 0.2 ? '#28a745' : (sentiment < -0.2 ? '#dc3545' : '#6c757d');
         const sentimentText = sentiment > 0.2 ? '正面' : (sentiment < -0.2 ? '负面' : '中性');
+        const sourceUrl = normalizeNewsUrl(news.url || '');
+        const titleHtml = sourceUrl
+            ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer" style="color:#1d4ed8; text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${escapeHtml(news.title)}</a>`
+            : escapeHtml(news.title);
         
         return `
             <div style="border: 1px solid #eee; border-radius: 8px; padding: 15px; margin-bottom: 15px; transition: box-shadow 0.2s;" 
                  onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'" 
                  onmouseout="this.style.boxShadow='none'">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
-                    <h4 style="margin: 0; flex: 1; font-size: 16px; color: #333;">${escapeHtml(news.title)}</h4>
+                    <h4 style="margin: 0; flex: 1; font-size: 16px; color: #333;">${titleHtml}</h4>
                     <span style="background: ${sentimentColor}20; color: ${sentimentColor}; padding: 3px 10px; border-radius: 12px; font-size: 12px; margin-left: 10px; white-space: nowrap;">
                         ${sentimentText}
                     </span>
@@ -305,9 +336,15 @@ function displayNews(newsList) {
                 </p>
                 <div style="display: flex; gap: 20px; font-size: 12px; color: #888;">
                     <span>📅 ${news.publish_time || '未知时间'}</span>
-                    <span>📍 ${news.source || '未知来源'}</span>
+                    <span>📍 ${escapeHtml(getNewsSourceLabel(news.source || 'unknown'))}</span>
                     <span>⭐ 重要性: ${((news.importance || 0.5) * 100).toFixed(0)}%</span>
                     <span>📊 情感: ${sentiment.toFixed(2)}</span>
+                </div>
+                <div style="margin-top: 8px;">
+                    ${sourceUrl
+                        ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer" style="font-size: 13px; color: #2563eb;">查看新闻全文 ↗</a>`
+                        : '<span style="font-size: 12px; color: #94a3b8;">暂无原文链接</span>'
+                    }
                 </div>
                 ${news.categories && news.categories.length > 0 ? `
                     <div style="margin-top: 8px;">
@@ -369,9 +406,9 @@ async function queryNewsDailyFeatures() {
             .filter(key => features[key] !== undefined && features[key] !== null)
             .map(key => `
                 <div style="border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px;">
-                    <div style="font-size: 12px; color: #64748b;">${key}</div>
+                    <div style="font-size: 12px; color: #64748b;">${escapeHtml(getNewsFeatureLabel(key))}</div>
                     <div style="font-size: 18px; font-weight: 700; color: #0f172a;">
-                        ${typeof features[key] === 'number' ? Number(features[key]).toFixed(4) : escapeHtml(String(features[key]))}
+                        ${formatNewsFeatureValue(key, features[key])}
                     </div>
                 </div>
             `).join('');
@@ -386,7 +423,7 @@ async function queryNewsDailyFeatures() {
                 ${cards || '<div style="color:#666;">暂无核心指标</div>'}
             </div>
             <details style="margin-top: 12px;">
-                <summary style="cursor: pointer; color: #2563eb;">查看完整原始特征 JSON</summary>
+                <summary style="cursor: pointer; color: #2563eb;">查看完整原始特征数据</summary>
                 <pre style="margin-top: 8px; padding: 10px; background: #0f172a; color: #e2e8f0; border-radius: 8px; overflow-x: auto;">${escapeHtml(JSON.stringify(features, null, 2))}</pre>
             </details>
         `;
@@ -401,6 +438,44 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function getNewsFeatureLabel(key) {
+    return NEWS_FEATURE_LABEL_MAP[key] || key;
+}
+
+function formatNewsFeatureValue(key, value) {
+    if (value === null || value === undefined || value === '') {
+        return '-';
+    }
+
+    if (typeof value !== 'number') {
+        return escapeHtml(String(value));
+    }
+
+    if (NEWS_FEATURE_PERCENT_KEYS.has(key)) {
+        return `${(value * 100).toFixed(2)}%`;
+    }
+
+    return Number(value).toFixed(4);
+}
+
+function getNewsSourceLabel(source) {
+    return NEWS_SOURCE_LABEL_MAP[source] || source || '未知来源';
+}
+
+function normalizeNewsUrl(url) {
+    const text = String(url || '').trim();
+    if (!text) {
+        return '';
+    }
+    if (text.startsWith('http://') || text.startsWith('https://')) {
+        return text;
+    }
+    if (text.startsWith('//')) {
+        return `https:${text}`;
+    }
+    return '';
 }
 
 // 页面加载时查询

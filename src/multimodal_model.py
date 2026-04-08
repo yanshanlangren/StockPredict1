@@ -1,56 +1,60 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-多模态预测模型 - 融合新闻、技术指标、相关性矩阵的全局预测模型
+多模态预测模型 - 融合新闻、文本、技术指标、相关性特征。
 
-功能：
-1. 模型训练 - 使用所有股票数据训练全局多模态模型
-2. 股票预测 - 基于训练好的模型进行单股预测
+Phase 4 增强：
+1. 新增文本向量分支（统计特征 + Hashing 向量）
+2. 支持更重模型结构（heavy）
+3. 与结构化基线自动做增量对比，未优于基线时仅保存候选模型
 """
 
 import os
 import json
 import logging
-from typing import Optional, Dict, List, Tuple
-from datetime import datetime
 import hashlib
+from typing import Optional, Dict, List, Any
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# 尝试导入TensorFlow
+# 尝试导入 TensorFlow
 try:
     import tensorflow as tf
     from tensorflow import keras
     from tensorflow.keras import layers, models, callbacks
     from tensorflow.keras.optimizers import Adam
+
     TENSORFLOW_AVAILABLE = True
     logger.info("✓ TensorFlow已加载，多模态模型功能可用")
 except ImportError:
     TENSORFLOW_AVAILABLE = False
-    logger.warning("TensorFlow未安装，使用简化版预测模型")
+    logger.warning("TensorFlow未安装，训练功能不可用，预测将降级为规则模式")
 
 # 获取项目根目录
 def _get_project_root():
     """获取项目根目录"""
-    if os.environ.get('COZE_WORKSPACE_PATH'):
-        return os.environ.get('COZE_WORKSPACE_PATH')
+    if os.environ.get("COZE_WORKSPACE_PATH"):
+        return os.environ.get("COZE_WORKSPACE_PATH")
     try:
         current_file = os.path.abspath(__file__)
         src_dir = os.path.dirname(current_file)
         return os.path.dirname(src_dir)
-    except:
+    except Exception:
         return os.getcwd()
+
 
 PROJECT_ROOT = _get_project_root()
 MODEL_DIR = os.path.join(PROJECT_ROOT, "models")
+RESULT_DIR = os.path.join(PROJECT_ROOT, "results")
 MODEL_NAME = "multimodal_stock_predictor"
 
 
 class MultiModalPredictor:
-    """多模态股票预测模型"""
+    """多模态股票预测模型（单例）"""
 
     _instance = None
 
@@ -64,329 +68,666 @@ class MultiModalPredictor:
         """初始化多模态预测器"""
         if model_dir is None:
             model_dir = MODEL_DIR
-        
+
         self.model_dir = model_dir
         os.makedirs(model_dir, exist_ok=True)
-        
+
         self.model = None
         self.model_name = MODEL_NAME
-        
+        self.metadata: Dict[str, Any] = {}
+
         # 特征维度
         self.news_feature_dim = 64
         self.sector_feature_dim = 32
         self.tech_feature_dim = 12
         self.relevance_dim = 16
-        
+        self.text_feature_dim = 128
+        self.text_stat_dim = 16
+        self.text_hash_dim = self.text_feature_dim - self.text_stat_dim
+
         # 领域列表
         self.sectors = [
-            '银行', '证券', '保险', '地产', '汽车', 
-            '科技', '医药', '消费', '能源', '军工',
-            '基建', '传媒', '教育', '农业', '交通'
+            "银行",
+            "证券",
+            "保险",
+            "地产",
+            "汽车",
+            "科技",
+            "医药",
+            "消费",
+            "能源",
+            "军工",
+            "基建",
+            "传媒",
+            "教育",
+            "农业",
+            "交通",
         ]
-        
+
+        self.positive_keywords = ["增长", "利好", "上涨", "增持", "突破", "回购", "盈利", "超预期", "高景气", "订单"]
+        self.negative_keywords = ["下滑", "利空", "下跌", "减持", "亏损", "风险", "处罚", "违约", "暴雷", "裁员"]
+
         # 尝试加载模型
         self._load_model()
 
     def is_available(self) -> bool:
-        """检查模型是否可用"""
-        return True  # 简化版始终可用
+        """检查模型是否可用。规则版预测始终可用。"""
+        return True
+
+    def _keras_model_path(self) -> str:
+        return os.path.join(self.model_dir, f"{self.model_name}.keras")
+
+    def _keras_candidate_path(self) -> str:
+        return os.path.join(self.model_dir, f"{self.model_name}_candidate.keras")
+
+    def _metadata_path(self) -> str:
+        return os.path.join(self.model_dir, f"{self.model_name}_metadata.json")
 
     def _load_model(self):
-        """加载已训练的模型"""
-        if not TENSORFLOW_AVAILABLE:
-            logger.info("使用简化版预测模型（无需TensorFlow）")
-            return
-
-        model_path = os.path.join(self.model_dir, f"{self.model_name}.keras")
-        metadata_path = os.path.join(self.model_dir, f"{self.model_name}_metadata.json")
-        
-        if os.path.exists(model_path):
+        """加载已训练模型与元数据"""
+        metadata_path = self._metadata_path()
+        if os.path.exists(metadata_path):
             try:
-                self.model = keras.models.load_model(model_path)
-                logger.info(f"✓ 多模态模型加载成功: {model_path}")
-                
-                # 加载元数据
-                if os.path.exists(metadata_path):
-                    with open(metadata_path, 'r', encoding='utf-8') as f:
-                        self.metadata = json.load(f)
+                with open(metadata_path, "r", encoding="utf-8") as file_obj:
+                    self.metadata = json.load(file_obj)
             except Exception as e:
-                logger.warning(f"加载模型失败: {e}")
-                self.model = None
-        else:
-            logger.info(f"多模态模型文件不存在: {model_path}")
+                logger.warning(f"读取模型元数据失败: {e}")
 
-    def _build_model(self) -> keras.Model:
-        """构建多模态神经网络模型"""
+        if TENSORFLOW_AVAILABLE:
+            model_path = self._keras_model_path()
+            if os.path.exists(model_path):
+                try:
+                    self.model = keras.models.load_model(model_path)
+                    logger.info(f"✓ 多模态 TensorFlow 模型加载成功: {model_path}")
+                except Exception as e:
+                    logger.warning(f"加载 TensorFlow 模型失败: {e}")
+                    self.model = None
+
+        if self.model is None:
+            logger.info("未找到已训练多模态模型，当前使用规则版预测")
+
+    def _build_model(self, model_tier: str = "heavy"):
+        """构建多模态神经网络模型（固定 heavy 结构）"""
         if not TENSORFLOW_AVAILABLE:
             return None
-        
+
+        # 模型复杂度固定为 heavy；model_tier 参数仅为兼容旧调用链
+        _ = model_tier
+        news_units, sector_units, tech_units, relevance_units, text_units = 64, 32, 64, 24, 128
+        fusion_layers = [256, 128, 64]
+        fusion_dropouts = [0.35, 0.25, 0.15]
+        learning_rate = 8e-4
+
         # 新闻特征输入
-        news_input = layers.Input(shape=(self.news_feature_dim,), name='news_features')
-        news_dense = layers.Dense(32, activation='relu')(news_input)
-        news_dropout = layers.Dropout(0.2)(news_dense)
-        
-        # 领域影响特征输入
-        sector_input = layers.Input(shape=(self.sector_feature_dim,), name='sector_features')
-        sector_dense = layers.Dense(16, activation='relu')(sector_input)
-        
+        news_input = layers.Input(shape=(self.news_feature_dim,), name="news_features")
+        news_branch = layers.Dense(news_units, activation="relu")(news_input)
+        news_branch = layers.Dropout(0.2)(news_branch)
+
+        # 领域影响输入
+        sector_input = layers.Input(shape=(self.sector_feature_dim,), name="sector_features")
+        sector_branch = layers.Dense(sector_units, activation="relu")(sector_input)
+
         # 技术指标输入
-        tech_input = layers.Input(shape=(self.tech_feature_dim,), name='tech_features')
-        tech_dense = layers.Dense(32, activation='relu')(tech_input)
-        tech_dropout = layers.Dropout(0.2)(tech_dense)
-        
-        # 相关性特征输入
-        relevance_input = layers.Input(shape=(self.relevance_dim,), name='relevance_features')
-        relevance_dense = layers.Dense(8, activation='relu')(relevance_input)
-        
-        # 多模态融合
-        concat = layers.Concatenate()([news_dropout, sector_dense, tech_dropout, relevance_dense])
-        
-        # 全连接层
-        x = layers.Dense(128, activation='relu')(concat)
-        x = layers.BatchNormalization()(x)
-        x = layers.Dropout(0.3)(x)
-        x = layers.Dense(64, activation='relu')(x)
-        x = layers.BatchNormalization()(x)
-        x = layers.Dropout(0.2)(x)
-        x = layers.Dense(32, activation='relu')(x)
-        
-        # 输出层
-        output = layers.Dense(1, activation='sigmoid', name='prediction')(x)
-        
-        # 构建模型
+        tech_input = layers.Input(shape=(self.tech_feature_dim,), name="tech_features")
+        tech_branch = layers.Dense(tech_units, activation="relu")(tech_input)
+        tech_branch = layers.Dropout(0.2)(tech_branch)
+
+        # 相关性输入
+        relevance_input = layers.Input(shape=(self.relevance_dim,), name="relevance_features")
+        relevance_branch = layers.Dense(relevance_units, activation="relu")(relevance_input)
+
+        # 文本向量输入（Phase 4）
+        text_input = layers.Input(shape=(self.text_feature_dim,), name="text_features")
+        text_branch = layers.Dense(text_units, activation="relu")(text_input)
+        text_branch = layers.Dropout(0.25)(text_branch)
+
+        # 融合
+        concat = layers.Concatenate()(
+            [news_branch, sector_branch, tech_branch, relevance_branch, text_branch]
+        )
+
+        x = concat
+        for layer_units, layer_dropout in zip(fusion_layers, fusion_dropouts):
+            x = layers.Dense(layer_units, activation="relu")(x)
+            x = layers.BatchNormalization()(x)
+            x = layers.Dropout(layer_dropout)(x)
+
+        output = layers.Dense(1, activation="sigmoid", name="prediction")(x)
+
         model = models.Model(
-            inputs=[news_input, sector_input, tech_input, relevance_input],
-            outputs=output
+            inputs=[news_input, sector_input, tech_input, relevance_input, text_input],
+            outputs=output,
         )
-        
+
         model.compile(
-            optimizer=Adam(learning_rate=0.001),
-            loss='binary_crossentropy',
-            metrics=['accuracy']
+            optimizer=Adam(learning_rate=learning_rate),
+            loss="binary_crossentropy",
+            metrics=[
+                keras.metrics.BinaryAccuracy(name="accuracy"),
+                keras.metrics.AUC(name="auc"),
+            ],
         )
-        
         return model
+
+    def _normalize_2d(self, array: np.ndarray, expected_dim: int) -> np.ndarray:
+        """将输入标准化为二维矩阵，并按目标维度截断/补零。"""
+        arr = np.asarray(array, dtype=float)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        if arr.ndim != 2:
+            arr = arr.reshape(arr.shape[0], -1)
+
+        current_dim = arr.shape[1]
+        if current_dim == expected_dim:
+            return arr
+
+        if current_dim > expected_dim:
+            return arr[:, :expected_dim]
+
+        pad = np.zeros((arr.shape[0], expected_dim - current_dim), dtype=float)
+        return np.hstack([arr, pad])
+
+    def _prepare_training_arrays(self, training_data: Dict) -> Dict[str, np.ndarray]:
+        required_keys = [
+            "news_features",
+            "sector_features",
+            "tech_features",
+            "relevance_features",
+            "labels",
+        ]
+        missing_keys = [key for key in required_keys if key not in training_data]
+        if missing_keys:
+            raise ValueError(f"训练数据缺少字段: {', '.join(missing_keys)}")
+
+        labels = np.asarray(training_data["labels"]).astype(int).reshape(-1)
+        n_samples = len(labels)
+        if n_samples == 0:
+            raise ValueError("训练数据为空")
+
+        news = self._normalize_2d(training_data["news_features"], self.news_feature_dim)
+        sector = self._normalize_2d(training_data["sector_features"], self.sector_feature_dim)
+        tech = self._normalize_2d(training_data["tech_features"], self.tech_feature_dim)
+        relevance = self._normalize_2d(training_data["relevance_features"], self.relevance_dim)
+
+        text_raw = training_data.get("text_features")
+        if text_raw is None:
+            text = np.zeros((n_samples, self.text_feature_dim), dtype=float)
+        else:
+            text = self._normalize_2d(text_raw, self.text_feature_dim)
+
+        matrices = {
+            "news": news,
+            "sector": sector,
+            "tech": tech,
+            "relevance": relevance,
+            "text": text,
+            "labels": labels,
+        }
+
+        for name, matrix in matrices.items():
+            if name == "labels":
+                continue
+            if matrix.shape[0] != n_samples:
+                raise ValueError(f"{name} 样本数与标签不一致: {matrix.shape[0]} != {n_samples}")
+
+        unique_labels = np.unique(labels)
+        if len(unique_labels) < 2:
+            raise ValueError("训练标签仅包含单一类别，无法训练分类模型")
+
+        return matrices
+
+    def _load_baseline_metrics(self) -> Dict[str, Any]:
+        """读取最近结构化基线报告中的关键指标。"""
+        report_path = os.path.join(RESULT_DIR, "structured_baseline_report_latest.json")
+        if not os.path.exists(report_path):
+            return {
+                "available": False,
+                "source": report_path,
+                "message": "未找到 structured_baseline_report_latest.json",
+            }
+
+        try:
+            with open(report_path, "r", encoding="utf-8") as file_obj:
+                report = json.load(file_obj)
+
+            test_metrics = report.get("metrics", {}).get("test", {})
+            if not test_metrics:
+                holdout = report.get("holdout_results", {}).get("all_features", {})
+                test_metrics = holdout.get("test_metrics", {}) if isinstance(holdout, dict) else {}
+
+            return {
+                "available": bool(test_metrics),
+                "source": report_path,
+                "created_at": report.get("created_at"),
+                "model_type": report.get("model_type") or report.get("config", {}).get("model_type"),
+                "accuracy": self._safe_float(test_metrics.get("accuracy"), None),
+                "auc": self._safe_float(test_metrics.get("auc"), None),
+                "f1": self._safe_float(test_metrics.get("f1"), None),
+                "topk_hit_rate": self._safe_float(test_metrics.get("topk_hit_rate"), None),
+            }
+        except Exception as e:
+            logger.warning(f"读取基线报告失败: {e}")
+            return {
+                "available": False,
+                "source": report_path,
+                "message": str(e),
+            }
+
+    def _compare_with_baseline(self, final_metrics: Dict[str, Any]) -> Dict[str, Any]:
+        """将多模态模型指标与最近基线报告对比。"""
+        baseline = self._load_baseline_metrics()
+        comparison = {
+            "baseline_available": bool(baseline.get("available")),
+            "baseline": baseline,
+            "target_metric": None,
+            "target_value": None,
+            "baseline_metric": None,
+            "baseline_value": None,
+            "delta": None,
+            "outperform_baseline": None,
+            "message": "",
+        }
+
+        if not comparison["baseline_available"]:
+            comparison["message"] = "未找到可用基线报告，默认允许替换模型"
+            return comparison
+
+        # 优先 AUC，其次准确率
+        metric_candidates = [
+            ("val_auc", "auc"),
+            ("val_accuracy", "accuracy"),
+        ]
+
+        for target_metric, baseline_metric in metric_candidates:
+            target_value = self._safe_float(final_metrics.get(target_metric), None)
+            baseline_value = self._safe_float(baseline.get(baseline_metric), None)
+            if target_value is None or baseline_value is None:
+                continue
+
+            delta = target_value - baseline_value
+            comparison.update(
+                {
+                    "target_metric": target_metric,
+                    "target_value": target_value,
+                    "baseline_metric": baseline_metric,
+                    "baseline_value": baseline_value,
+                    "delta": delta,
+                    "outperform_baseline": bool(delta > 0.0),
+                    "message": (
+                        f"{target_metric}={target_value:.4f}, "
+                        f"baseline.{baseline_metric}={baseline_value:.4f}, "
+                        f"delta={delta:+.4f}"
+                    ),
+                }
+            )
+            return comparison
+
+        comparison["message"] = "基线或当前模型缺少可比指标，默认允许替换模型"
+        return comparison
+
+    @staticmethod
+    def _should_replace_model(comparison: Dict[str, Any]) -> bool:
+        """依据对比结果判断是否替换线上模型。"""
+        if comparison.get("baseline_available") and comparison.get("outperform_baseline") is False:
+            return False
+        return True
+
+    def _save_metadata(self, metadata: Dict[str, Any]) -> None:
+        metadata_path = self._metadata_path()
+        with open(metadata_path, "w", encoding="utf-8") as file_obj:
+            json.dump(metadata, file_obj, indent=2, ensure_ascii=False)
+        self.metadata = metadata
+
+    def _train_tensorflow(
+        self,
+        arrays: Dict[str, np.ndarray],
+        epochs: int,
+        batch_size: int,
+        model_tier: str,
+    ) -> Dict[str, Any]:
+        """使用 TensorFlow 训练多模态模型。"""
+        model = self._build_model(model_tier=model_tier)
+        X_train = [arrays["news"], arrays["sector"], arrays["tech"], arrays["relevance"], arrays["text"]]
+        y_train = arrays["labels"]
+
+        callback_list = [
+            callbacks.EarlyStopping(
+                monitor="val_loss",
+                patience=12,
+                restore_best_weights=True,
+            ),
+            callbacks.ReduceLROnPlateau(
+                monitor="val_loss",
+                factor=0.5,
+                patience=4,
+                min_lr=1e-6,
+            ),
+        ]
+
+        history = model.fit(
+            X_train,
+            y_train,
+            epochs=max(5, int(epochs)),
+            batch_size=max(8, int(batch_size)),
+            validation_split=0.2,
+            callbacks=callback_list,
+            verbose=1,
+        )
+
+        final_metrics = {
+            "loss": self._safe_float(history.history.get("loss", [None])[-1], 0.0),
+            "accuracy": self._safe_float(history.history.get("accuracy", [None])[-1], 0.0),
+            "auc": self._safe_float(history.history.get("auc", [None])[-1], 0.5),
+            "val_loss": self._safe_float(history.history.get("val_loss", [None])[-1], 0.0),
+            "val_accuracy": self._safe_float(history.history.get("val_accuracy", [None])[-1], 0.0),
+            "val_auc": self._safe_float(history.history.get("val_auc", [None])[-1], 0.5),
+        }
+
+        comparison = self._compare_with_baseline(final_metrics)
+        should_replace = self._should_replace_model(comparison)
+
+        model_path = self._keras_model_path() if should_replace else self._keras_candidate_path()
+        model.save(model_path)
+
+        if should_replace:
+            self.model = model
+        production_available = bool(should_replace or self.model is not None)
+
+        metadata = {
+            "model_name": self.model_name,
+            "available": production_available,
+            "created_at": datetime.now().isoformat(),
+            "backend": "tensorflow",
+            "model_tier": model_tier,
+            "training_samples": int(len(y_train)),
+            "epochs_trained": int(len(history.history.get("loss", []))),
+            "final_metrics": final_metrics,
+            "feature_dims": {
+                "news": self.news_feature_dim,
+                "sector": self.sector_feature_dim,
+                "tech": self.tech_feature_dim,
+                "relevance": self.relevance_dim,
+                "text": self.text_feature_dim,
+            },
+            "text_encoder": {
+                "type": "native_hashing" if self.text_hash_dim > 0 else "none",
+                "stat_dim": self.text_stat_dim,
+                "hash_dim": self.text_hash_dim,
+            },
+            "baseline_comparison": comparison,
+            "production_model_replaced": should_replace,
+            "model_path": model_path,
+            "candidate_only": not should_replace,
+            "tensorflow_available": TENSORFLOW_AVAILABLE,
+        }
+
+        self._save_metadata(metadata)
+
+        message = "模型训练完成并已替换线上模型"
+        if not should_replace:
+            message = "模型训练完成，但未优于基线，仅保存为候选模型"
+
+        return {
+            "success": True,
+            "message": message,
+            "model_path": model_path,
+            "metadata": metadata,
+        }
 
     def get_model_info(self) -> Dict:
         """获取模型信息"""
-        metadata_path = os.path.join(self.model_dir, f"{self.model_name}_metadata.json")
-        
+        info: Dict[str, Any] = {}
+
+        metadata_path = self._metadata_path()
         if os.path.exists(metadata_path):
             try:
-                with open(metadata_path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except:
-                pass
-        
-        # 检查模型文件是否存在
-        model_path = os.path.join(self.model_dir, f"{self.model_name}.keras")
-        if os.path.exists(model_path):
-            return {
-                'available': True,
-                'model_name': self.model_name,
-                'tensorflow_available': TENSORFLOW_AVAILABLE
-            }
-        
-        return {'available': False}
+                with open(metadata_path, "r", encoding="utf-8") as file_obj:
+                    info = json.load(file_obj)
+            except Exception as e:
+                logger.warning(f"读取模型信息失败: {e}")
 
-    def train(self, training_data: Dict, epochs: int = 50, batch_size: int = 32) -> Dict:
+        info.setdefault("model_name", self.model_name)
+        info["tensorflow_available"] = TENSORFLOW_AVAILABLE
+
+        runtime_backend = "rule_based"
+        if self.model is not None:
+            runtime_backend = "tensorflow"
+        info["runtime_backend"] = runtime_backend
+
+        info["available"] = bool(self.model is not None)
+        return info
+
+    def train(
+        self,
+        training_data: Dict,
+        epochs: int = 50,
+        batch_size: int = 32,
+        model_tier: str = "heavy",
+    ) -> Dict:
         """
-        训练多模态模型
-        
+        训练多模态模型。
+
         Args:
             training_data: 训练数据字典，包含：
-                - news_features: 新闻特征数组 (n_samples, news_feature_dim)
-                - sector_features: 领域特征数组 (n_samples, sector_feature_dim)
-                - tech_features: 技术指标特征数组 (n_samples, tech_feature_dim)
-                - relevance_features: 相关性特征数组 (n_samples, relevance_dim)
-                - labels: 标签数组 (n_samples,) 1=上涨, 0=下跌
+                - news_features: (n_samples, news_feature_dim)
+                - sector_features: (n_samples, sector_feature_dim)
+                - tech_features: (n_samples, tech_feature_dim)
+                - relevance_features: (n_samples, relevance_dim)
+                - text_features: (n_samples, text_feature_dim)，可选
+                - labels: (n_samples,)
             epochs: 训练轮数
             batch_size: 批量大小
-            
+            model_tier: 兼容字段，当前固定 heavy
+
         Returns:
             训练结果
         """
-        if not TENSORFLOW_AVAILABLE:
-            return {
-                'success': False,
-                'message': 'TensorFlow不可用，无法训练神经网络模型'
-            }
-        
+        tier = "heavy"
+
         try:
-            # 构建模型
-            self.model = self._build_model()
-            
-            # 准备训练数据
-            X_train = [
-                np.array(training_data['news_features']),
-                np.array(training_data['sector_features']),
-                np.array(training_data['tech_features']),
-                np.array(training_data['relevance_features'])
-            ]
-            y_train = np.array(training_data['labels'])
-            
-            # 划分验证集
-            val_split = 0.2
-            
-            # 回调函数
-            callback_list = [
-                callbacks.EarlyStopping(
-                    monitor='val_loss',
-                    patience=10,
-                    restore_best_weights=True
-                ),
-                callbacks.ReduceLROnPlateau(
-                    monitor='val_loss',
-                    factor=0.5,
-                    patience=5,
-                    min_lr=1e-6
+            arrays = self._prepare_training_arrays(training_data)
+
+            if TENSORFLOW_AVAILABLE:
+                return self._train_tensorflow(
+                    arrays=arrays,
+                    epochs=epochs,
+                    batch_size=batch_size,
+                    model_tier=tier,
                 )
-            ]
-            
-            # 训练模型
-            history = self.model.fit(
-                X_train, y_train,
-                epochs=epochs,
-                batch_size=batch_size,
-                validation_split=val_split,
-                callbacks=callback_list,
-                verbose=1
-            )
-            
-            # 保存模型
-            model_path = os.path.join(self.model_dir, f"{self.model_name}.keras")
-            self.model.save(model_path)
-            
-            # 保存元数据
-            metadata = {
-                'model_name': self.model_name,
-                'available': True,
-                'created_at': datetime.now().isoformat(),
-                'training_samples': len(y_train),
-                'epochs_trained': len(history.history['loss']),
-                'final_metrics': {
-                    'loss': float(history.history['loss'][-1]),
-                    'accuracy': float(history.history['accuracy'][-1]),
-                    'val_loss': float(history.history['val_loss'][-1]),
-                    'val_accuracy': float(history.history['val_accuracy'][-1])
-                },
-                'feature_dims': {
-                    'news': self.news_feature_dim,
-                    'sector': self.sector_feature_dim,
-                    'tech': self.tech_feature_dim,
-                    'relevance': self.relevance_dim
-                }
-            }
-            
-            metadata_path = os.path.join(self.model_dir, f"{self.model_name}_metadata.json")
-            with open(metadata_path, 'w', encoding='utf-8') as f:
-                json.dump(metadata, f, indent=2, ensure_ascii=False)
-            
-            logger.info(f"✓ 多模态模型训练完成，保存至: {model_path}")
-            
+
             return {
-                'success': True,
-                'model_path': model_path,
-                'metadata': metadata
+                "success": False,
+                "message": "TensorFlow 不可用，无法训练多模态模型",
             }
-            
+
         except Exception as e:
             logger.error(f"训练模型失败: {e}")
             import traceback
+
             traceback.print_exc()
             return {
-                'success': False,
-                'message': str(e)
+                "success": False,
+                "message": str(e),
             }
 
     def encode_news_features(self, news_list: List[Dict]) -> np.ndarray:
-        """编码新闻特征向量"""
+        """编码新闻统计特征向量"""
         features = np.zeros(self.news_feature_dim)
-        
+
         if not news_list:
             return features.reshape(1, -1)
 
-        sentiments = [n.get('sentiment', 0) for n in news_list]
-        importances = [n.get('importance', 0.5) for n in news_list]
-        
+        sentiments = [news.get("sentiment", 0) for news in news_list]
+        importances = [news.get("importance", 0.5) for news in news_list]
+
         # 基础统计
         features[0] = np.mean(sentiments)
         features[1] = np.std(sentiments) if len(sentiments) > 1 else 0
         features[2] = np.mean(importances)
         features[3] = min(len(news_list) / 50, 1)
-        
+
         # 情感分布
-        features[4] = sum(1 for s in sentiments if s > 0.2) / max(len(sentiments), 1)
-        features[5] = sum(1 for s in sentiments if s < -0.2) / max(len(sentiments), 1)
-        
+        features[4] = sum(1 for val in sentiments if val > 0.2) / max(len(sentiments), 1)
+        features[5] = sum(1 for val in sentiments if val < -0.2) / max(len(sentiments), 1)
+
         # 时间加权情感
         current_time = datetime.now()
         time_weights = []
         for news in news_list:
-            pub_time = news.get('publish_time', '')
-            if pub_time:
+            publish_time = news.get("publish_time", "")
+            if publish_time:
                 try:
-                    dt = datetime.strptime(pub_time, '%Y-%m-%d %H:%M:%S')
-                    hours_ago = (current_time - dt).total_seconds() / 3600
+                    dt_value = datetime.strptime(publish_time, "%Y-%m-%d %H:%M:%S")
+                    hours_ago = (current_time - dt_value).total_seconds() / 3600
                     weight = np.exp(-hours_ago / 24)
-                except:
+                except Exception:
                     weight = 0.5
             else:
                 weight = 0.5
             time_weights.append(weight)
-        
+
         weighted_sentiment = np.average(sentiments, weights=time_weights) if time_weights else 0
         features[6] = weighted_sentiment
-        
+
         # 类别分布
         categories = {}
         for news in news_list:
-            for cat in news.get('categories', []):
-                categories[cat] = categories.get(cat, 0) + 1
-        
-        for i, cat in enumerate(list(categories.keys())[:20]):
-            features[7 + i] = categories[cat] / len(news_list)
-        
+            for category in news.get("categories", []):
+                categories[category] = categories.get(category, 0) + 1
+
+        for index, category in enumerate(list(categories.keys())[:20]):
+            features[7 + index] = categories[category] / len(news_list)
+
         return features.reshape(1, -1)
+
+    def encode_news_text_features(self, news_list: List[Dict]) -> np.ndarray:
+        """编码新闻文本向量（统计特征 + Hashing 向量）"""
+        features = np.zeros(self.text_feature_dim)
+        if not news_list:
+            return features.reshape(1, -1)
+
+        texts: List[str] = []
+        title_lengths = []
+        content_lengths = []
+        pos_hits = 0
+        neg_hits = 0
+        punct_count = 0
+        unique_chars = set()
+
+        for news in news_list:
+            title = str(news.get("title", ""))
+            content = str(news.get("content", ""))
+            merged_text = f"{title} {content}".strip()
+
+            if merged_text:
+                texts.append(merged_text)
+                unique_chars.update(set(merged_text))
+
+            title_lengths.append(len(title))
+            content_lengths.append(len(content))
+
+            for keyword in self.positive_keywords:
+                pos_hits += merged_text.count(keyword)
+            for keyword in self.negative_keywords:
+                neg_hits += merged_text.count(keyword)
+
+            punct_count += merged_text.count("!") + merged_text.count("！")
+            punct_count += merged_text.count("?") + merged_text.count("？")
+
+        total_hits = max(pos_hits + neg_hits, 1)
+        features[0] = min(self._safe_float(np.mean(title_lengths), 0.0) / 40.0, 1.0)
+        features[1] = min(self._safe_float(np.mean(content_lengths), 0.0) / 300.0, 1.0)
+        features[2] = self._safe_float(pos_hits / total_hits, 0.0)
+        features[3] = self._safe_float(neg_hits / total_hits, 0.0)
+        features[4] = min(self._safe_float(punct_count / max(len(texts), 1), 0.0) / 8.0, 1.0)
+        features[5] = min(self._safe_float(len(unique_chars), 0.0) / 800.0, 1.0)
+        features[6] = min(self._safe_float(len(texts), 0.0) / 20.0, 1.0)
+
+        sentiments = [self._safe_float(news.get("sentiment", 0.0), 0.0) for news in news_list]
+        features[7] = self._safe_float(np.mean(sentiments), 0.0) if sentiments else 0.0
+
+        # 文本哈希向量拼接到后半段（原生实现，避免依赖 sklearn）
+        if texts and self.text_hash_dim > 0:
+            try:
+                hashed_dense = self._encode_text_hash_features(texts)
+                used_dim = min(len(hashed_dense), self.text_hash_dim)
+                start = self.text_stat_dim
+                features[start : start + used_dim] = hashed_dense[:used_dim]
+            except Exception as e:
+                logger.warning(f"文本哈希向量编码失败: {e}")
+
+        return features.reshape(1, -1)
+
+    def _encode_text_hash_features(self, texts: List[str]) -> np.ndarray:
+        """将文本映射到固定维度哈希向量（char n-gram）。"""
+        vector = np.zeros(self.text_hash_dim, dtype=float)
+        if not texts or self.text_hash_dim <= 0:
+            return vector
+
+        total = 0
+        for raw_text in texts:
+            text = str(raw_text or "").strip()
+            if not text:
+                continue
+
+            length = len(text)
+            for ngram in (2, 3, 4):
+                if length < ngram:
+                    continue
+
+                for idx in range(length - ngram + 1):
+                    token = text[idx : idx + ngram]
+                    token_hash = hashlib.md5(token.encode("utf-8")).hexdigest()
+                    position = int(token_hash[:8], 16) % self.text_hash_dim
+                    vector[position] += 1.0
+                    total += 1
+
+        if total > 0:
+            vector /= float(total)
+            norm = np.linalg.norm(vector)
+            if norm > 0:
+                vector /= norm
+
+        return vector
 
     def encode_sector_features(self, sector_impact: Dict[str, float]) -> np.ndarray:
         """编码领域影响特征向量"""
         features = np.zeros(self.sector_feature_dim)
-        
-        for i, sector in enumerate(self.sectors[:self.sector_feature_dim]):
-            features[i] = sector_impact.get(sector, 0)
-        
+
+        for index, sector in enumerate(self.sectors[: self.sector_feature_dim]):
+            features[index] = sector_impact.get(sector, 0)
+
         return features.reshape(1, -1)
 
     def encode_technical_features(self, df: pd.DataFrame) -> np.ndarray:
         """编码技术指标特征"""
         features = np.zeros(self.tech_feature_dim)
-        
+
         if df.empty or len(df) < 20:
             return features.reshape(1, -1)
 
         try:
-            close = df['close']
-            
-            # 辅助函数：安全获取值，避免NaN
+            close = df["close"]
+
+            # 辅助函数：安全获取值，避免 NaN
             def safe_get(val, default=0.0):
                 try:
-                    f = float(val)
-                    return f if not (np.isnan(f) or np.isinf(f)) else default
-                except:
+                    float_val = float(val)
+                    return float_val if not (np.isnan(float_val) or np.isinf(float_val)) else default
+                except Exception:
                     return default
-            
+
             # 收益率
             features[0] = safe_get((close.iloc[-1] / close.iloc[-5] - 1) * 100)
             features[1] = safe_get((close.iloc[-1] / close.iloc[-20] - 1) * 100)
-            
+
             # 波动率
             returns = close.pct_change()
             std5 = returns.tail(5).std()
             std20 = returns.tail(20).std()
             features[2] = safe_get(std5 * 100) if not np.isnan(std5) else 0
             features[3] = safe_get(std20 * 100) if not np.isnan(std20) else 0
-            
+
             # RSI
             delta = close.diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -395,14 +736,14 @@ class MultiModalPredictor:
             rsi = 100 - (100 / (1 + rs))
             rsi_val = rsi.iloc[-1]
             features[4] = safe_get(rsi_val / 100) if not np.isnan(rsi_val) else 0.5
-            
+
             # MACD
             ema12 = close.ewm(span=12, adjust=False).mean()
             ema26 = close.ewm(span=26, adjust=False).mean()
             macd = ema12 - ema26
             macd_val = macd.iloc[-1]
             features[5] = safe_get(macd_val / close.iloc[-1] * 100)
-            
+
             # 布林带位置
             ma20 = close.rolling(20).mean()
             std20_bb = close.rolling(20).std()
@@ -410,14 +751,14 @@ class MultiModalPredictor:
             lower = ma20 - 2 * std20_bb
             bb_position = (close.iloc[-1] - lower.iloc[-1]) / (upper.iloc[-1] - lower.iloc[-1] + 1e-10)
             features[6] = safe_get(bb_position, 0.5)
-            
+
             # 成交量比率
-            volume = df['volume']
+            volume = df["volume"]
             vol_mean = volume.tail(20).mean()
             if vol_mean > 0:
                 volume_ratio = volume.iloc[-1] / vol_mean
                 features[7] = min(safe_get(volume_ratio / 5, 0.2), 1)
-            
+
             # 价格位置（使用可用数据范围）
             lookback = min(60, len(close))
             rolling_high = close.rolling(lookback).max()
@@ -429,7 +770,7 @@ class MultiModalPredictor:
                 features[8] = safe_get(price_position, 0.5)
             else:
                 features[8] = 0.5
-            
+
             # 均线趋势
             ma5 = close.rolling(5).mean()
             ma10 = close.rolling(10).mean()
@@ -437,173 +778,203 @@ class MultiModalPredictor:
             if len(df) >= 20:
                 features[9] = 1 if ma5.iloc[-1] > ma10.iloc[-1] > ma20_val.iloc[-1] else -1
                 features[10] = safe_get((ma5.iloc[-1] - ma20_val.iloc[-1]) / ma20_val.iloc[-1] * 100)
-            
+
             # 动量
             momentum = close.pct_change(10).iloc[-1] * 100
             features[11] = safe_get(momentum)
-            
+
         except Exception as e:
             logger.warning(f"计算技术指标失败: {e}")
 
         return features.reshape(1, -1)
 
-    def encode_relevance_features(self, relevance_matrix: np.ndarray,
-                                  stock_idx: int) -> np.ndarray:
+    def encode_relevance_features(self, relevance_matrix: np.ndarray, stock_idx: int) -> np.ndarray:
         """编码相关性特征"""
         features = np.zeros(self.relevance_dim)
-        
+
         if relevance_matrix is None or relevance_matrix.size == 0:
             return features.reshape(1, -1)
 
         try:
             correlations = relevance_matrix[stock_idx]
-            
+
             features[0] = np.mean(correlations)
             features[1] = np.max(correlations)
             features[2] = np.std(correlations)
             features[3] = np.sum(correlations > 0.5) / len(correlations)
             features[4] = np.sum(correlations > 0.7) / len(correlations)
-            
+
             sorted_corr = np.sort(correlations)[::-1]
-            for i in range(min(10, len(sorted_corr))):
-                features[5 + i] = sorted_corr[i]
-                
+            for index in range(min(10, len(sorted_corr))):
+                features[5 + index] = sorted_corr[index]
+
         except Exception as e:
             logger.warning(f"编码相关性特征失败: {e}")
 
         return features.reshape(1, -1)
 
-    def predict(self, news_features: np.ndarray,
-                sector_features: np.ndarray,
-                tech_features: np.ndarray,
-                relevance_features: np.ndarray) -> Dict:
+    def predict(
+        self,
+        news_features: np.ndarray,
+        sector_features: np.ndarray,
+        tech_features: np.ndarray,
+        relevance_features: np.ndarray,
+        text_features: Optional[np.ndarray] = None,
+    ) -> Dict:
         """执行预测"""
+        news_features = self._normalize_2d(news_features, self.news_feature_dim)
+        sector_features = self._normalize_2d(sector_features, self.sector_feature_dim)
+        tech_features = self._normalize_2d(tech_features, self.tech_feature_dim)
+        relevance_features = self._normalize_2d(relevance_features, self.relevance_dim)
+
+        if text_features is None:
+            text_features = np.zeros((news_features.shape[0], self.text_feature_dim), dtype=float)
+        text_features = self._normalize_2d(text_features, self.text_feature_dim)
+
         if TENSORFLOW_AVAILABLE and self.model is not None:
-            prob = self.model.predict([
-                news_features,
-                sector_features,
-                tech_features,
-                relevance_features
-            ], verbose=0)[0][0]
+            input_count = len(getattr(self.model, "inputs", []))
+            if input_count >= 5:
+                model_inputs = [
+                    news_features,
+                    sector_features,
+                    tech_features,
+                    relevance_features,
+                    text_features,
+                ]
+            else:
+                # 兼容旧模型（4路输入）
+                model_inputs = [news_features, sector_features, tech_features, relevance_features]
+
+            prob = float(self.model.predict(model_inputs, verbose=0)[0][0])
+            backend = "tensorflow"
         else:
             prob = self._simple_predict(
                 news_features,
                 sector_features,
                 tech_features,
-                relevance_features
+                relevance_features,
+                text_features,
             )
+            backend = "rule_based"
 
-        # 确保 prob 是有效数值
         if np.isnan(prob) or np.isinf(prob):
-            prob = 0.5  # 默认中性概率
-        
-        prob = float(prob)
+            prob = 0.5
+
         prediction = 1 if prob > 0.5 else 0
         confidence = prob if prediction == 1 else 1 - prob
-        
+
         return {
-            'success': True,
-            'prediction': int(prediction),
-            'prediction_text': '上涨' if prediction == 1 else '下跌',
-            'probability': round(prob, 4),
-            'confidence': round(float(confidence), 4),
-            'model_type': 'multimodal',
-            'features_used': {
-                'news': bool(np.any(news_features)),
-                'sector': bool(np.any(sector_features)),
-                'tech': bool(np.any(tech_features)),
-                'relevance': bool(np.any(relevance_features))
-            }
+            "success": True,
+            "prediction": int(prediction),
+            "prediction_text": "上涨" if prediction == 1 else "下跌",
+            "probability": round(float(prob), 4),
+            "confidence": round(float(confidence), 4),
+            "model_type": "multimodal",
+            "backend": backend,
+            "features_used": {
+                "news": bool(np.any(news_features)),
+                "sector": bool(np.any(sector_features)),
+                "tech": bool(np.any(tech_features)),
+                "relevance": bool(np.any(relevance_features)),
+                "text": bool(np.any(text_features)),
+            },
         }
 
-    def _simple_predict(self, news_features: np.ndarray,
-                        sector_features: np.ndarray,
-                        tech_features: np.ndarray,
-                        relevance_features: np.ndarray) -> float:
-        """简化版预测（加权融合）"""
+    def _simple_predict(
+        self,
+        news_features: np.ndarray,
+        sector_features: np.ndarray,
+        tech_features: np.ndarray,
+        relevance_features: np.ndarray,
+        text_features: np.ndarray,
+    ) -> float:
+        """规则版预测（无训练模型时使用）"""
         # 新闻情感权重 (-1 到 1)
         news_score = float(news_features[0, 0]) * 0.5 + float(news_features[0, 6]) * 0.5
-        
+
         # 领域影响权重
         sector_mean = np.mean(sector_features)
         sector_score = float(sector_mean) if not np.isnan(sector_mean) else 0.0
-        
+
         # 技术指标评分 (-0.5 到 0.5)
         tech_score = 0.0
         try:
-            # 均线趋势: 1=多头排列(涨), -1=空头排列(跌), 0=震荡
             ma_trend = float(tech_features[0, 9])
             tech_score += ma_trend * 0.15
-            
-            # RSI: 超卖(反弹概率高) vs 超买(回调概率高)
+
             rsi = float(tech_features[0, 4])
-            if rsi < 0.3:  # 超卖
+            if rsi < 0.3:
                 tech_score += 0.1
-            elif rsi > 0.7:  # 超买
+            elif rsi > 0.7:
                 tech_score -= 0.1
-            
-            # 布林带位置
+
             bb_pos = float(tech_features[0, 6])
-            if bb_pos < 0.2:  # 接近下轨，可能反弹
+            if bb_pos < 0.2:
                 tech_score += 0.1
-            elif bb_pos > 0.8:  # 接近上轨，可能回调
+            elif bb_pos > 0.8:
                 tech_score -= 0.1
-            
-            # 近期收益率
+
             ret_5d = float(tech_features[0, 0])
-            if ret_5d > 2:  # 大涨后可能回调
+            if ret_5d > 2:
                 tech_score -= 0.1
-            elif ret_5d < -2:  # 大跌后可能反弹
+            elif ret_5d < -2:
                 tech_score += 0.1
-            
-            # 动量
+
             momentum = float(tech_features[0, 11])
-            if momentum < -3:  # 负动量过大
+            if momentum < -3:
                 tech_score -= 0.1
-            elif momentum > 3:  # 正动量过大
+            elif momentum > 3:
                 tech_score += 0.05
-                
         except (IndexError, ValueError):
             pass
-        
+
         # 相关性权重
         relevance_score = 0.0
         try:
             rel_mean = float(relevance_features[0, 0])
-            if rel_mean > 0.6:  # 强相关
+            if rel_mean > 0.6:
                 relevance_score += 0.1
-            elif rel_mean < 0.3:  # 弱相关
+            elif rel_mean < 0.3:
                 relevance_score -= 0.05
         except (IndexError, ValueError):
             pass
-        
-        # 加权融合：新闻30%，领域20%，技术指标40%，相关性10%
+
+        # 文本权重（Phase 4）
+        text_score = 0.0
+        try:
+            polarity = float(text_features[0, 2]) - float(text_features[0, 3])
+            sentiment_hint = float(text_features[0, 7])
+            text_score += polarity * 0.12 + sentiment_hint * 0.08
+        except (IndexError, ValueError):
+            pass
+
+        # 加权融合
         combined = (
-            news_score * 0.3 +
-            sector_score * 0.2 +
-            tech_score * 0.4 +
-            relevance_score * 0.1
+            news_score * 0.28
+            + sector_score * 0.18
+            + tech_score * 0.36
+            + relevance_score * 0.10
+            + text_score * 0.08
         )
-        
-        # 确保 combined 是有效数值
+
         if np.isnan(combined) or np.isinf(combined):
             combined = 0.0
-        
-        # 归一化到概率 (sigmoid函数)
-        # combined 范围约 -0.5 到 0.5，乘以系数放大差异
+
         prob = 1 / (1 + np.exp(-combined * 8))
-        
         return float(prob)
 
-    def predict_stock(self, stock_code: str, 
-                      kline_df: pd.DataFrame,
-                      news_list: List[Dict] = None,
-                      sector_impact: Dict[str, float] = None,
-                      relevance_matrix: np.ndarray = None,
-                      stock_idx: int = 0) -> Dict:
+    def predict_stock(
+        self,
+        stock_code: str,
+        kline_df: pd.DataFrame,
+        news_list: List[Dict] = None,
+        sector_impact: Dict[str, float] = None,
+        relevance_matrix: np.ndarray = None,
+        stock_idx: int = 0,
+    ) -> Dict:
         """
-        单股预测
-        
+        单股预测。
+
         Args:
             stock_code: 股票代码
             kline_df: K线数据
@@ -611,20 +982,18 @@ class MultiModalPredictor:
             sector_impact: 领域影响
             relevance_matrix: 相关性矩阵
             stock_idx: 股票索引
-            
-        Returns:
-            预测结果
         """
         if news_list is None:
             news_list = []
         if sector_impact is None:
             sector_impact = {}
-            
+
         # 编码特征
         news_features = self.encode_news_features(news_list)
+        text_features = self.encode_news_text_features(news_list)
         sector_features = self.encode_sector_features(sector_impact)
         tech_features = self.encode_technical_features(kline_df)
-        
+
         if relevance_matrix is not None:
             relevance_features = self.encode_relevance_features(relevance_matrix, stock_idx)
         else:
@@ -635,61 +1004,74 @@ class MultiModalPredictor:
             news_features,
             sector_features,
             tech_features,
-            relevance_features
+            relevance_features,
+            text_features,
         )
 
-        # 添加详细信息
-        latest_price = float(kline_df['close'].iloc[-1]) if not kline_df.empty else 0.0
-        
-        # 安全获取特征值
+        latest_price = float(kline_df["close"].iloc[-1]) if not kline_df.empty else 0.0
+
         def safe_float(val, default=0.0):
             try:
-                f = float(val)
-                return f if not (np.isnan(f) or np.isinf(f)) else default
-            except:
+                float_val = float(val)
+                return float_val if not (np.isnan(float_val) or np.isinf(float_val)) else default
+            except Exception:
                 return default
-        
+
         news_sentiment = safe_float(news_features[0, 0])
         news_weighted = safe_float(news_features[0, 6])
+        text_polarity = safe_float(text_features[0, 2] - text_features[0, 3])
         tech_trend_val = safe_float(tech_features[0, 9])
         rsi_val = safe_float(tech_features[0, 4])
-        
-        # 计算领域影响平均值
+
         sector_mean = 0.0
         if sector_impact:
-            values = [safe_float(v) for v in sector_impact.values()]
-            valid_values = [v for v in values if v != 0.0]
+            values = [safe_float(val) for val in sector_impact.values()]
+            valid_values = [val for val in values if val != 0.0]
             if valid_values:
                 sector_mean = np.mean(valid_values)
-        
-        prediction.update({
-            'stock_code': stock_code,
-            'latest_price': round(latest_price, 2),
-            'news_count': len(news_list),
-            'analysis_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'feature_summary': {
-                'news_sentiment': round(news_sentiment, 4),
-                'news_weighted_sentiment': round(news_weighted, 4),
-                'sector_impact': round(float(sector_mean), 4),
-                'tech_trend': 'up' if tech_trend_val > 0 else 'down',
-                'rsi': round(rsi_val, 4)
-            }
-        })
 
-        # 计算预期收益
-        confidence = prediction['confidence']
-        if prediction['prediction'] == 1:
+        prediction.update(
+            {
+                "stock_code": stock_code,
+                "latest_price": round(latest_price, 2),
+                "news_count": len(news_list),
+                "analysis_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "feature_summary": {
+                    "news_sentiment": round(news_sentiment, 4),
+                    "news_weighted_sentiment": round(news_weighted, 4),
+                    "text_polarity": round(text_polarity, 4),
+                    "sector_impact": round(float(sector_mean), 4),
+                    "tech_trend": "up" if tech_trend_val > 0 else "down",
+                    "rsi": round(rsi_val, 4),
+                },
+            }
+        )
+
+        confidence = prediction["confidence"]
+        if prediction["prediction"] == 1:
             expected_return = confidence * 3
             predicted_price = latest_price * (1 + expected_return / 100)
         else:
             expected_return = -confidence * 2
             predicted_price = latest_price * (1 + expected_return / 100)
 
-        prediction['expected_return'] = round(expected_return, 2)
-        prediction['predicted_price'] = round(predicted_price, 2)
-        prediction['success'] = True
+        prediction["expected_return"] = round(expected_return, 2)
+        prediction["predicted_price"] = round(predicted_price, 2)
+        prediction["success"] = True
 
         return prediction
+
+    @staticmethod
+    def _safe_float(value, default: Optional[float] = 0.0) -> Optional[float]:
+        """安全转换为 float。default 可为 None。"""
+        try:
+            result = float(value)
+        except Exception:
+            return default
+
+        if np.isnan(result) or np.isinf(result):
+            return default
+        return result
 
 
 # 单例获取函数

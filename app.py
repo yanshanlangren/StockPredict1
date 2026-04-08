@@ -24,6 +24,7 @@ import logging
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.data_source_manager import DataSourceManager, DataSource
+from src.schedule_utils import build_trade_close_timestamp, get_previous_trade_date
 from config import PROCESSED_DATA_DIR, RESULT_DIR
 
 # 配置日志
@@ -32,8 +33,13 @@ logger = logging.getLogger(__name__)
 
 # 尝试导入多模态模型
 MULTIMODAL_MODEL_AVAILABLE = False
+multimodal_predictor = None
+MULTIMODAL_TF_AVAILABLE = False
 try:
-    from src.multimodal_model import get_multimodal_predictor
+    from src.multimodal_model import (
+        get_multimodal_predictor,
+        TENSORFLOW_AVAILABLE as MULTIMODAL_TF_AVAILABLE,
+    )
     multimodal_predictor = get_multimodal_predictor()
     model_info = multimodal_predictor.get_model_info()
     MULTIMODAL_MODEL_AVAILABLE = model_info.get('available', False)
@@ -191,10 +197,135 @@ def _load_dataset_preview(dataset_path, limit=5):
         }
 
 
+MULTIMODAL_TECH_REQUIRED_COLUMNS = [
+    'ret_1d',
+    'ret_5d',
+    'ret_20d',
+    'vol_5d',
+    'vol_20d',
+    'rsi',
+    'macd',
+    'bb_position',
+    'ma5_gt_ma10',
+    'ma10_gt_ma20',
+    'volume_ratio',
+]
+
+MULTIMODAL_NEWS_SENTIMENT_COLUMNS = [
+    'news_count',
+    'avg_sentiment',
+    'weighted_sentiment',
+    'news_impact_total',
+]
+
+
+def _load_dataset_columns(dataset_path: str):
+    """读取数据集字段列表。"""
+    if not dataset_path or not os.path.exists(dataset_path):
+        return []
+
+    try:
+        if dataset_path.endswith('.parquet'):
+            frame = pd.read_parquet(dataset_path)
+        else:
+            frame = pd.read_csv(dataset_path, nrows=1)
+        return list(frame.columns)
+    except Exception as e:
+        logger.warning(f"读取数据集字段失败: {dataset_path}, error={e}")
+        return []
+
+
+def _build_multimodal_feature_status(model_dataset_path: str):
+    """构建多模态特征分组状态。"""
+    columns = _load_dataset_columns(model_dataset_path)
+    column_set = set(columns)
+
+    tech_missing = [col for col in MULTIMODAL_TECH_REQUIRED_COLUMNS if col not in column_set]
+    news_missing = [col for col in MULTIMODAL_NEWS_SENTIMENT_COLUMNS if col not in column_set]
+
+    has_sector = any(col.startswith('sector_') for col in columns)
+    has_relevance = any(
+        col.startswith('relevance_')
+        or col.startswith('static_')
+        or col.startswith('stock_sector_')
+        for col in columns
+    )
+
+    feature_groups = [
+        {
+            'name': 'news_sentiment',
+            'label': '新闻情感',
+            'ready': len(news_missing) == 0,
+            'missing': news_missing,
+            'hint': 'news_count / avg_sentiment / weighted_sentiment / news_impact_total',
+        },
+        {
+            'name': 'sector_impact',
+            'label': '领域影响',
+            'ready': bool(has_sector),
+            'missing': [] if has_sector else ['sector_*'],
+            'hint': '需要 sector_* 字段',
+        },
+        {
+            'name': 'technical',
+            'label': '技术指标',
+            'ready': len(tech_missing) == 0,
+            'missing': tech_missing,
+            'hint': '需要 ret/rsi/macd/bb/ma/volume 等技术面字段',
+        },
+        {
+            'name': 'relevance',
+            'label': '相关性矩阵',
+            'ready': bool(has_relevance),
+            'missing': [] if has_relevance else ['relevance_* / static_* / stock_sector_*'],
+            'hint': '需要相关性或静态关联字段',
+        },
+    ]
+
+    return {
+        'ready': all(item['ready'] for item in feature_groups),
+        'feature_groups': feature_groups,
+        'column_count': len(columns),
+    }
+
+
+def _build_multimodal_precheck(metadata: dict = None):
+    """多模态训练前置检查（输入数据 + 特征分组）。"""
+    metadata = metadata or {}
+    row_counts = metadata.get('row_counts', {}) if isinstance(metadata, dict) else {}
+    paths = metadata.get('paths', {}) if isinstance(metadata, dict) else {}
+
+    required_inputs = ['model_dataset', 'market_daily', 'news_raw']
+    inputs = []
+    resolved_path_map = {}
+    for name in required_inputs:
+        raw_path = paths.get(name)
+        path = raw_path if raw_path and os.path.exists(raw_path) else _resolve_processed_dataset_path(name)
+        exists = bool(path and os.path.exists(path))
+        resolved_path_map[name] = path
+        inputs.append({
+            'name': name,
+            'label': name,
+            'ready': exists,
+            'path': path,
+            'row_count': int(row_counts.get(name, 0)) if row_counts.get(name) is not None else 0,
+        })
+
+    feature_status = _build_multimodal_feature_status(resolved_path_map.get('model_dataset'))
+
+    return {
+        'ready': all(item['ready'] for item in inputs),
+        'inputs': inputs,
+        'feature_status': feature_status,
+        'tensorflow_available': bool(MULTIMODAL_TF_AVAILABLE),
+    }
+
+
 def _build_dataset_info():
     """汇总数据集构建信息和输出文件状态。"""
     baseline_report = _load_latest_baseline_report()
     metadata = _load_dataset_metadata()
+    multimodal_precheck = _build_multimodal_precheck(metadata)
     if not metadata:
         return {
             'available': False,
@@ -204,7 +335,8 @@ def _build_dataset_info():
                 'columns': [],
                 'rows': []
             },
-            'baseline': baseline_report
+            'baseline': baseline_report,
+            'multimodal_precheck': multimodal_precheck,
         }
 
     outputs = []
@@ -225,7 +357,8 @@ def _build_dataset_info():
         'metadata': metadata,
         'outputs': outputs,
         'preview': preview,
-        'baseline': baseline_report
+        'baseline': baseline_report,
+        'multimodal_precheck': multimodal_precheck,
     }
 
 
@@ -281,6 +414,198 @@ def _load_latest_json_report(filename: str):
         logger.error(f"读取报告失败 {filename}: {e}")
         return None
 
+
+def _to_plain_json_value(value):
+    """Convert numpy/pandas values into JSON-safe scalars."""
+    if value is None:
+        return None
+    if isinstance(value, (list, dict, tuple)):
+        return value
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return value.isoformat()
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _build_dataset_sample_replay(stock_code: str, trade_date: str = None, news_limit: int = 20):
+    """Replay one stock_code + trade_date sample and return alignment diagnostics."""
+    normalized_code = str(stock_code).strip().zfill(6)
+    news_limit = max(1, min(int(news_limit), 200))
+
+    model_path = _resolve_processed_dataset_path('model_dataset')
+    if not model_path:
+        raise FileNotFoundError('未找到 model_dataset，请先构建离线数据集')
+
+    model_df = _load_dataframe_by_path(model_path)
+    if model_df is None or model_df.empty:
+        raise ValueError('model_dataset 为空')
+
+    required_model_cols = {'stock_code', 'trade_date', 'label_up_5d'}
+    missing = [col for col in required_model_cols if col not in model_df.columns]
+    if missing:
+        raise ValueError(f"model_dataset 缺少字段: {', '.join(missing)}")
+
+    model_frame = model_df.copy()
+    model_frame['stock_code'] = model_frame['stock_code'].astype(str).str.zfill(6)
+    model_frame['trade_date'] = pd.to_datetime(model_frame['trade_date'], errors='coerce').dt.normalize()
+    model_frame = model_frame.dropna(subset=['trade_date'])
+    model_frame = model_frame[model_frame['stock_code'] == normalized_code].sort_values('trade_date')
+
+    if model_frame.empty:
+        return {
+            'stock_code': normalized_code,
+            'available': False,
+            'message': '该股票在 model_dataset 中暂无样本',
+            'available_dates': [],
+        }
+
+    if trade_date:
+        target_date = pd.to_datetime(trade_date, errors='coerce')
+        if pd.isna(target_date):
+            raise ValueError('trade_date 格式错误，请使用 YYYY-MM-DD')
+        target_date = target_date.normalize()
+        selected = model_frame[model_frame['trade_date'] == target_date]
+        if selected.empty:
+            return {
+                'stock_code': normalized_code,
+                'available': False,
+                'message': f'{target_date.date()} 无样本数据',
+                'available_dates': model_frame['trade_date'].dt.strftime('%Y-%m-%d').tail(120).tolist(),
+            }
+        sample_row = selected.iloc[-1]
+    else:
+        sample_row = model_frame.iloc[-1]
+        target_date = sample_row['trade_date']
+
+    # 读取 market_daily 构建交易日历 + 当日行情
+    market_snapshot = None
+    trade_calendar = []
+    market_path = _resolve_processed_dataset_path('market_daily')
+    if market_path:
+        market_df = _load_dataframe_by_path(market_path)
+        if market_df is not None and not market_df.empty and {'stock_code', 'trade_date'}.issubset(market_df.columns):
+            market_frame = market_df.copy()
+            market_frame['stock_code'] = market_frame['stock_code'].astype(str).str.zfill(6)
+            market_frame['trade_date'] = pd.to_datetime(market_frame['trade_date'], errors='coerce').dt.normalize()
+            market_frame = market_frame.dropna(subset=['trade_date'])
+            market_frame = market_frame[market_frame['stock_code'] == normalized_code].sort_values('trade_date')
+            if not market_frame.empty:
+                trade_calendar = sorted(market_frame['trade_date'].dropna().unique().tolist())
+                market_selected = market_frame[market_frame['trade_date'] == target_date]
+                if not market_selected.empty:
+                    market_snapshot = {
+                        key: _to_plain_json_value(val)
+                        for key, val in market_selected.iloc[-1].to_dict().items()
+                    }
+
+    # 读取 news_daily_features 当日聚合快照
+    news_daily_snapshot = None
+    news_daily_path = _resolve_processed_dataset_path('news_daily_features')
+    if news_daily_path:
+        news_daily_df = _load_dataframe_by_path(news_daily_path)
+        if (
+            news_daily_df is not None
+            and not news_daily_df.empty
+            and {'stock_code', 'trade_date'}.issubset(news_daily_df.columns)
+        ):
+            news_daily_frame = news_daily_df.copy()
+            news_daily_frame['stock_code'] = news_daily_frame['stock_code'].astype(str).str.zfill(6)
+            news_daily_frame['trade_date'] = pd.to_datetime(news_daily_frame['trade_date'], errors='coerce').dt.normalize()
+            news_daily_frame = news_daily_frame.dropna(subset=['trade_date'])
+            daily_selected = news_daily_frame[
+                (news_daily_frame['stock_code'] == normalized_code)
+                & (news_daily_frame['trade_date'] == target_date)
+            ]
+            if not daily_selected.empty:
+                news_daily_snapshot = {
+                    key: _to_plain_json_value(val)
+                    for key, val in daily_selected.iloc[-1].to_dict().items()
+                }
+
+    # 计算新闻时间窗并回放 used_news
+    previous_trade_date = get_previous_trade_date(trade_calendar, target_date, include_current=False) if trade_calendar else None
+    window_start_ts = build_trade_close_timestamp(previous_trade_date, market_close_hour=15, market_close_minute=0) if previous_trade_date is not None else None
+    window_end_ts = build_trade_close_timestamp(target_date, market_close_hour=15, market_close_minute=0)
+
+    news_used = []
+    future_news_count = 0
+    raw_news_path = _resolve_processed_dataset_path('news_raw')
+    if raw_news_path:
+        news_raw_df = _load_dataframe_by_path(raw_news_path)
+        if (
+            news_raw_df is not None
+            and not news_raw_df.empty
+            and {'stock_code', 'publish_time'}.issubset(news_raw_df.columns)
+        ):
+            raw_frame = news_raw_df.copy()
+            raw_frame['stock_code'] = raw_frame['stock_code'].astype(str).str.zfill(6)
+            raw_frame['publish_time'] = pd.to_datetime(raw_frame['publish_time'], errors='coerce')
+            raw_frame = raw_frame.dropna(subset=['publish_time'])
+            raw_frame = raw_frame[raw_frame['stock_code'] == normalized_code]
+
+            if window_end_ts is not None:
+                future_news_count = int((raw_frame['publish_time'] > window_end_ts).sum())
+                used_mask = raw_frame['publish_time'] <= window_end_ts
+                if window_start_ts is not None:
+                    used_mask &= raw_frame['publish_time'] > window_start_ts
+                used_news = raw_frame[used_mask].sort_values('publish_time', ascending=False).head(news_limit)
+            else:
+                used_news = raw_frame.sort_values('publish_time', ascending=False).head(news_limit)
+
+            for _, row in used_news.iterrows():
+                news_used.append({
+                    'publish_time': row['publish_time'].strftime('%Y-%m-%d %H:%M:%S'),
+                    'source': str(row.get('source', '') or ''),
+                    'title': str(row.get('title', '') or ''),
+                    'sentiment': _to_plain_json_value(row.get('sentiment')),
+                    'importance': _to_plain_json_value(row.get('importance')),
+                })
+
+    used_latest_publish_time = news_used[0]['publish_time'] if news_used else None
+    time_check_passed = True
+    if news_used and window_end_ts is not None:
+        try:
+            max_used_publish = max(pd.to_datetime(item['publish_time']) for item in news_used)
+            time_check_passed = bool(max_used_publish <= window_end_ts)
+        except Exception:
+            time_check_passed = False
+
+    excluded_fields = {'stock_code', 'stock_name', 'trade_date', 'label_up_5d', 'future_ret_5d', 'date'}
+    feature_snapshot = {}
+    for key, value in sample_row.to_dict().items():
+        if key in excluded_fields:
+            continue
+        feature_snapshot[key] = _to_plain_json_value(value)
+
+    return {
+        'stock_code': normalized_code,
+        'trade_date': target_date.strftime('%Y-%m-%d'),
+        'available': True,
+        'dataset_path': model_path,
+        'label_up_5d': int(_to_plain_json_value(sample_row.get('label_up_5d')) or 0),
+        'future_ret_5d': _to_plain_json_value(sample_row.get('future_ret_5d')),
+        'feature_count': len(feature_snapshot),
+        'feature_snapshot': feature_snapshot,
+        'market_snapshot': market_snapshot,
+        'news_daily_snapshot': news_daily_snapshot,
+        'news_window': {
+            'start': window_start_ts.strftime('%Y-%m-%d %H:%M:%S') if window_start_ts is not None else None,
+            'end': window_end_ts.strftime('%Y-%m-%d %H:%M:%S') if window_end_ts is not None else None,
+            'used_news_count': len(news_used),
+            'used_latest_publish_time': used_latest_publish_time,
+            'future_news_count_after_close': future_news_count,
+            'strict_time_check_passed': bool(time_check_passed),
+        },
+        'used_news': news_used,
+        'available_dates': model_frame['trade_date'].dt.strftime('%Y-%m-%d').tail(120).tolist(),
+    }
+
 # 在第一次请求时初始化组件
 @app.before_request
 def initialize_if_needed():
@@ -295,6 +620,13 @@ def initialize_if_needed():
 def index():
     """首页"""
     return render_template('index.html')
+
+
+@app.route('/overview')
+def overview_page():
+    """系统总览页面（原首页）"""
+    return render_template('overview.html')
+
 
 @app.route('/stock')
 def stock_page():
@@ -314,7 +646,7 @@ def predict_page():
 
 @app.route('/dataset')
 def dataset_page():
-    """离线数据集页面"""
+    """模型训练页面（数据构建 + 训练 + 评估 + 回测）"""
     return render_template('dataset.html')
 
 # ==================== API路由 ====================
@@ -345,13 +677,17 @@ def get_model_info():
     result = {
         'model_available': MULTIMODAL_MODEL_AVAILABLE
     }
+
+    if multimodal_predictor is None:
+        result['model_error'] = '多模态模型组件不可用'
+        return jsonify(result)
     
-    if MULTIMODAL_MODEL_AVAILABLE:
-        try:
-            model_info = multimodal_predictor.get_model_info()
-            result['model'] = model_info
-        except Exception as e:
-            result['model_error'] = str(e)
+    try:
+        model_info = multimodal_predictor.get_model_info()
+        result['model'] = model_info
+        result['model_available'] = bool(model_info.get('available', False))
+    except Exception as e:
+        result['model_error'] = str(e)
     
     return jsonify(result)
 
@@ -364,7 +700,10 @@ def train_model():
     {
         "stocks": 50,    # 训练使用的股票数量
         "days": 200,     # 每只股票的历史天数
-        "epochs": 50     # 训练轮数
+        "epochs": 50,    # 训练轮数
+        "dataset_path": "",     # 可选：model_dataset 路径
+        "market_path": "",      # 可选：market_daily 路径
+        "news_raw_path": ""     # 可选：news_raw 路径
     }
     """
     global training_status, MULTIMODAL_MODEL_AVAILABLE, multimodal_predictor
@@ -380,7 +719,56 @@ def train_model():
         stocks = params.get('stocks', 50)
         days = params.get('days', 200)
         epochs = params.get('epochs', 50)
-        
+        model_tier = 'heavy'
+        dataset_path = params.get('dataset_path')
+        market_path = params.get('market_path')
+        news_raw_path = params.get('news_raw_path')
+
+        if isinstance(dataset_path, str):
+            dataset_path = dataset_path.strip() or None
+        else:
+            dataset_path = None
+
+        if isinstance(market_path, str):
+            market_path = market_path.strip() or None
+        else:
+            market_path = None
+
+        if isinstance(news_raw_path, str):
+            news_raw_path = news_raw_path.strip() or None
+        else:
+            news_raw_path = None
+
+        if not MULTIMODAL_TF_AVAILABLE:
+            return jsonify({
+                'success': False,
+                'message': '当前环境未启用 TensorFlow，多模态训练只允许 TensorFlow 模式'
+            }), 400
+
+        resolved_input_paths = {
+            'model_dataset': dataset_path or _resolve_processed_dataset_path('model_dataset'),
+            'market_daily': market_path or _resolve_processed_dataset_path('market_daily'),
+            'news_raw': news_raw_path or _resolve_processed_dataset_path('news_raw'),
+        }
+        missing_inputs = [
+            name for name, path in resolved_input_paths.items()
+            if not path or not os.path.exists(path)
+        ]
+        if missing_inputs:
+            precheck = _build_multimodal_precheck(_load_dataset_metadata())
+            return jsonify({
+                'success': False,
+                'message': (
+                    '训练前请先在“模型训练”页面构建离线数据集，'
+                    f'缺失输入: {", ".join(missing_inputs)}'
+                ),
+                'precheck': precheck,
+            }), 400
+
+        dataset_path = resolved_input_paths['model_dataset']
+        market_path = resolved_input_paths['market_daily']
+        news_raw_path = resolved_input_paths['news_raw']
+
         training_status = {
             'is_training': True,
             'progress': 0,
@@ -391,7 +779,11 @@ def train_model():
             'params': {
                 'stocks': stocks,
                 'days': days,
-                'epochs': epochs
+                'epochs': epochs,
+                'model_tier': model_tier,
+                'dataset_path': dataset_path,
+                'market_path': market_path,
+                'news_raw_path': news_raw_path
             }
         }
     
@@ -401,15 +793,23 @@ def train_model():
         try:
             with training_lock:
                 training_status['progress'] = 10
-                training_status['message'] = f'正在收集 {stocks} 只股票的数据...'
+                training_status['message'] = f'正在收集 {stocks} 只股票的数据（heavy 模式）...'
             
             cmd = [
                 sys.executable,
                 'train_multimodal_model.py',
                 '--stocks', str(stocks),
                 '--days', str(days),
-                '--epochs', str(epochs)
+                '--epochs', str(epochs),
+                '--model-tier', 'heavy'
             ]
+
+            if dataset_path:
+                cmd.extend(['--dataset-path', dataset_path])
+            if market_path:
+                cmd.extend(['--market-path', market_path])
+            if news_raw_path:
+                cmd.extend(['--news-raw-path', news_raw_path])
             
             logger.info(f"启动训练: {' '.join(cmd)}")
             
@@ -429,6 +829,18 @@ def train_model():
                     with training_lock:
                         training_status['progress'] = 20
                         training_status['message'] = '正在准备训练数据...'
+                elif '加载标准数据集' in line:
+                    with training_lock:
+                        training_status['progress'] = 20
+                        training_status['message'] = '正在加载标准数据集...'
+                elif '解析特征字段' in line:
+                    with training_lock:
+                        training_status['progress'] = 30
+                        training_status['message'] = '正在解析多模态特征...'
+                elif '构建新闻文本对齐映射' in line:
+                    with training_lock:
+                        training_status['progress'] = 40
+                        training_status['message'] = '正在构建新闻文本向量...'
                 elif '处理股票' in line:
                     with training_lock:
                         training_status['progress'] = 40
@@ -484,7 +896,11 @@ def train_model():
         'params': {
             'stocks': stocks,
             'days': days,
-            'epochs': epochs
+            'epochs': epochs,
+            'model_tier': model_tier,
+            'dataset_path': dataset_path,
+            'market_path': market_path,
+            'news_raw_path': news_raw_path
         }
     })
 
@@ -557,10 +973,10 @@ def train_baseline_model():
         if isinstance(dataset_path, str):
             dataset_path = dataset_path.strip() or None
 
-        if model_type not in ['logistic', 'random_forest']:
+        if model_type not in ['logistic', 'random_forest', 'lightgbm']:
             return jsonify({
                 'success': False,
-                'message': 'model_type 只支持 logistic 或 random_forest'
+                'message': 'model_type 只支持 logistic / random_forest / lightgbm'
             }), 400
 
         top_k = max(1, min(top_k, 200))
@@ -823,6 +1239,9 @@ def run_cross_section_backtest():
                 'sector_distribution': report.get('sector_distribution', {}),
                 'equity_curve_points': len(report.get('equity_curve', [])),
                 'holding_days': len(report.get('daily_holdings', [])),
+                'equity_curve': report.get('equity_curve', []),
+                'daily_holdings': report.get('daily_holdings', []),
+                'config': report.get('config', {}),
             }
         })
     except ValueError as e:
@@ -845,6 +1264,40 @@ def get_dataset_info():
         'success': True,
         'data': _build_dataset_info()
     })
+
+
+@app.route('/api/dataset/sample/<stock_code>')
+def get_dataset_sample_replay(stock_code):
+    """按 stock_code + trade_date 回放样本，并校验新闻时间窗。"""
+    trade_date = request.args.get('trade_date')
+    news_limit = request.args.get('news_limit', 20, type=int)
+
+    try:
+        replay = _build_dataset_sample_replay(
+            stock_code=stock_code,
+            trade_date=trade_date,
+            news_limit=news_limit,
+        )
+        return jsonify({
+            'success': True,
+            'data': replay
+        })
+    except FileNotFoundError as e:
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 404
+    except ValueError as e:
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 400
+    except Exception as e:
+        logger.error(f"样本回放失败: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'样本回放失败: {str(e)}'
+        }), 500
 
 
 @app.route('/api/dataset/build/status')
@@ -1141,22 +1594,47 @@ def predict_batch():
     
     请求参数:
     {
-        "analyze_count": 100,  # 分析股票数量 (默认100, 最多5000)
-        "top_n": 20,           # 返回前N只股票
-        "hold_days": 5,        # 持有天数
-        "min_price": 0,        # 最低价格过滤
-        "max_price": 10000     # 最高价格过滤
+        "top_n": 20,            # 返回前N只股票
+        "kline_days": 120,      # K线历史窗口（最小60）
+        "news_limit": 20,       # 每只股票最多关联新闻条数
+        "use_news": true,       # 是否融合新闻情感/领域影响
+        "use_relevance": true,  # 是否融合相关性矩阵
+        "min_price": 0,         # 最低价格过滤
+        "max_price": 10000      # 最高价格过滤
     }
     """
     try:
         params = request.json if request.json else {}
-        analyze_count = min(int(params.get('analyze_count', 100)), 5000)  # 最多5000只
-        top_n = int(params.get('top_n', 20))
-        hold_days = int(params.get('hold_days', 5))
+
+        def parse_bool(value, default=True):
+            if value is None:
+                return default
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                return value.strip().lower() in {'1', 'true', 'yes', 'y', 'on'}
+            return bool(value)
+
+        top_n = max(1, min(int(params.get('top_n', 20)), 200))
+        kline_days = max(60, min(int(params.get('kline_days', 120)), 600))
+        news_limit = max(1, min(int(params.get('news_limit', 20)), 100))
+        use_news = parse_bool(params.get('use_news', True), True)
+        use_relevance = parse_bool(params.get('use_relevance', True), True)
         min_price = float(params.get('min_price', 0))
         max_price = float(params.get('max_price', 10000))
-        
-        logger.info(f"开始批量预测，analyze_count={analyze_count}, top_n={top_n}")
+        if max_price < min_price:
+            return jsonify({
+                'success': False,
+                'message': 'max_price 不能小于 min_price'
+            }), 400
+
+        logger.info(
+            "开始批量预测，stock_scope=all_cache, top_n=%s, kline_days=%s, use_news=%s, use_relevance=%s",
+            top_n,
+            kline_days,
+            use_news,
+            use_relevance,
+        )
         
         # 获取股票列表
         stock_list = data_manager.get_stock_list()
@@ -1168,18 +1646,77 @@ def predict_batch():
             }), 400
         
         from src.multimodal_model import get_multimodal_predictor
+        from src.news_crawler import get_news_crawler
+        from src.news_impact_analyzer import get_news_impact_analyzer
+        from src.relevance_graph import get_relevance_graph
         
         predictor = get_multimodal_predictor()
+        crawler = get_news_crawler()
+        analyzer = get_news_impact_analyzer()
+
+        # 相关性矩阵（全局只读取一次）
+        relevance_matrix = None
+        stock_idx_map = {}
+        if use_relevance:
+            try:
+                matrix_data = get_relevance_graph().get_relevance_matrix()
+                raw_matrix = matrix_data.get('matrix')
+                raw_codes = matrix_data.get('stock_codes', [])
+                if raw_matrix is not None and raw_codes:
+                    relevance_matrix = np.array(raw_matrix)
+                    stock_codes = [str(code).zfill(6) for code in raw_codes]
+                    stock_idx_map = {code: idx for idx, code in enumerate(stock_codes)}
+            except Exception as e:
+                logger.warning(f"读取相关性矩阵失败，将降级为无相关性特征: {e}")
+                relevance_matrix = None
+                stock_idx_map = {}
+
+        # 全量新闻只拉取一次，再按股票过滤
+        global_news = []
+        if use_news:
+            try:
+                if crawler.is_available():
+                    global_news = crawler.get_news(
+                        stock_code=None,
+                        limit=max(200, min(1200, news_limit * 12)),
+                        source='all',
+                        use_cache=True,
+                    )
+                else:
+                    logger.warning("新闻爬虫不可用，批量预测将降级为无新闻特征")
+            except Exception as e:
+                logger.warning(f"获取全量新闻失败，将降级为无新闻特征: {e}")
+                global_news = []
+
+        prepared_news = []
+        for item in global_news:
+            title = str(item.get('title', '') or '')
+            content = str(item.get('content', '') or '')
+            prepared_news.append((item, f"{title} {content}"))
+
+        stock_news_map = {}
+        if use_news and prepared_news:
+            for _, stock in stock_list.iterrows():
+                code = str(stock.get('code', '')).zfill(6)
+                name = str(stock.get('name', '') or '').strip()
+                matches = []
+                for news_item, text in prepared_news:
+                    if code in text or (name and name in text):
+                        matches.append(news_item)
+                        if len(matches) >= news_limit:
+                            break
+                stock_news_map[code] = matches
         
         predictions = []
         analyzed_count = 0
         
-        for idx, stock in stock_list.head(analyze_count).iterrows():
-            stock_code = str(stock['code'])
+        # 默认使用缓存中的全部股票
+        for _, stock in stock_list.iterrows():
+            stock_code = str(stock['code']).zfill(6)
             stock_name = stock.get('name', stock_code)
             
             try:
-                df = data_manager.get_stock_kline(stock_code, days=100)
+                df = data_manager.get_stock_kline(stock_code, days=kline_days)
                 
                 if df.empty or len(df) < 60:
                     continue
@@ -1188,23 +1725,25 @@ def predict_batch():
                 
                 if latest_price < min_price or latest_price > max_price:
                     continue
-                
-                # 简化预测（不获取新闻以提高速度）
+
+                news_list = stock_news_map.get(stock_code, []) if use_news else []
+                sector_impact = analyzer.get_sector_impact_vector(news_list) if news_list else {}
+                relevance_matrix_input = None
+                stock_idx = 0
+                if use_relevance and relevance_matrix is not None and stock_code in stock_idx_map:
+                    relevance_matrix_input = relevance_matrix
+                    stock_idx = stock_idx_map[stock_code]
+
                 result = predictor.predict_stock(
                     stock_code=stock_code,
                     kline_df=df,
-                    news_list=[],
-                    sector_impact={},
-                    relevance_matrix=None,
-                    stock_idx=0
+                    news_list=news_list,
+                    sector_impact=sector_impact,
+                    relevance_matrix=relevance_matrix_input,
+                    stock_idx=stock_idx
                 )
                 
                 if result.get('success'):
-                    # 根据hold_days调整预期收益
-                    base_return = result['expected_return']
-                    adjusted_return = base_return * (hold_days / 5.0)
-                    adjusted_price = latest_price * (1 + adjusted_return / 100)
-                    
                     predictions.append({
                         'stock_code': stock_code,
                         'stock_name': stock_name,
@@ -1213,9 +1752,11 @@ def predict_batch():
                         'prediction_text': result['prediction_text'],
                         'probability': float(round(result['probability'], 4)),
                         'confidence': float(round(result['confidence'], 4)),
-                        'expected_return': float(round(adjusted_return, 2)),
-                        'predicted_price': float(round(adjusted_price, 2)),
-                        'hold_days': hold_days
+                        'expected_return': float(round(result.get('expected_return', 0.0), 2)),
+                        'predicted_price': float(round(result.get('predicted_price', latest_price), 2)),
+                        'predict_horizon_days': 5,
+                        'news_count': int(result.get('news_count', len(news_list))),
+                        'backend': result.get('backend', 'rule_based'),
                     })
                     
                     analyzed_count += 1
@@ -1243,13 +1784,23 @@ def predict_batch():
                 'predictions': top_predictions,
                 'total_analyzed': analyzed_count,
                 'total_predictions': len(predictions),
+                'total_cached_stocks': int(len(stock_list)),
                 'up_count': up_count,
                 'down_count': down_count,
                 'analysis_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'hold_days': hold_days,
+                'predict_horizon_days': 5,
+                'input_params': {
+                    'top_n': top_n,
+                    'kline_days': kline_days,
+                    'news_limit': news_limit,
+                    'use_news': use_news,
+                    'use_relevance': use_relevance,
+                    'min_price': min_price,
+                    'max_price': max_price,
+                },
                 'model_info': {
                     'model_name': 'multimodal_stock_predictor',
-                    'base_predict_days': 5
+                    'predict_horizon_days': 5
                 }
             }
         })

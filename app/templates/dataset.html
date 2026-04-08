@@ -3,15 +3,18 @@
 {% block content %}
 <div class="card dataset-hero">
     <div class="dataset-hero-copy">
-        <div class="dataset-kicker">Offline Feature Pipeline</div>
-        <h2>🧱 数据工坊</h2>
+        <div class="dataset-kicker">离线特征流水线</div>
+        <h2>🧠 模型训练</h2>
         <p class="dataset-hero-text">
-            这里管理离线训练数据集。页面会把行情缓存、新闻缓存和静态关联特征拼成
-            <code>stock_code + trade_date</code> 级别样本，供后续基线模型和回测直接使用。
+            这里统一管理离线数据构建、结构化基线、多模态训练、离线评估和截面回测。
+            页面会把行情缓存、新闻缓存和静态关联特征拼成
+            <code>stock_code + trade_date</code> 级别样本，并驱动整条训练链路。
         </p>
         <div class="dataset-tag-row">
             <span class="dataset-tag">新功能：数据集构建</span>
             <span class="dataset-tag">新接口：/api/dataset/build</span>
+            <span class="dataset-tag">新接口：/api/model/train</span>
+            <span class="dataset-tag">新接口：/api/dataset/sample/&lt;stock_code&gt;</span>
             <span class="dataset-tag">新接口：/api/model/train-baseline</span>
             <span class="dataset-tag">新产物：model_dataset</span>
         </div>
@@ -50,9 +53,84 @@
         <div class="value" id="baseline-status-text">-</div>
     </div>
     <div class="stat-card">
-        <div class="label">最新测试 AUC</div>
+        <div class="label">最新测试集曲线面积</div>
         <div class="value" id="baseline-test-auc">-</div>
     </div>
+</div>
+
+<div class="card">
+    <h2>🤖 多模态模型训练</h2>
+    <div class="dataset-note" style="margin-bottom: 12px;">
+        训练前会检查 <code>model_dataset</code> / <code>market_daily</code> / <code>news_raw</code> 是否已构建，
+        并展示“新闻情感、领域影响、技术指标、相关性矩阵”四类特征状态。训练模式固定为 <code>heavy</code>（TensorFlow）。
+    </div>
+
+    <div id="mm-current-model-info" style="margin-bottom: 16px; padding: 12px; background: #f8fafc; border-radius: 8px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">当前多模态模型</div>
+        <div id="mm-model-details" style="color: #475569;">加载中...</div>
+    </div>
+
+    <div class="dataset-form-grid">
+        <div>
+            <div style="font-weight: 600; margin-bottom: 8px;">训练输入构建状态</div>
+            <div id="mm-input-status-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px;"></div>
+        </div>
+        <div>
+            <div style="font-weight: 600; margin-bottom: 8px;">多模态特征状态</div>
+            <div id="mm-feature-status-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px;"></div>
+        </div>
+    </div>
+
+    <div id="mm-precheck-summary" class="dataset-note" style="margin-top: 10px; margin-bottom: 10px;">
+        正在检查训练前置状态...
+    </div>
+
+    <div class="dataset-form-grid">
+        <div class="form-group">
+            <label for="mm-train-stocks">股票数量</label>
+            <input type="number" id="mm-train-stocks" min="10" max="1000" value="80">
+        </div>
+        <div class="form-group">
+            <label for="mm-train-days">历史天数</label>
+            <input type="number" id="mm-train-days" min="100" max="800" value="240">
+        </div>
+        <div class="form-group">
+            <label for="mm-train-epochs">训练轮数</label>
+            <input type="number" id="mm-train-epochs" min="10" max="300" value="60">
+        </div>
+        <div class="form-group">
+            <label>模型模式</label>
+            <input type="text" value="heavy（固定）" disabled>
+        </div>
+    </div>
+
+    <div class="dataset-action-row">
+        <button id="mm-train-btn" class="btn btn-success" onclick="startMultimodalTrain()">
+            开始多模态模型训练
+        </button>
+        <button id="mm-refresh-btn" class="btn btn-primary" onclick="refreshMultimodalPrecheck()">
+            刷新训练前置状态
+        </button>
+    </div>
+
+    <div id="mm-train-panel" class="dataset-build-panel baseline-build-panel" style="display: none; margin-top: 12px;">
+        <div class="dataset-build-header">
+            <div>
+                <div class="dataset-build-title">多模态训练进度</div>
+                <div class="dataset-build-message" id="mm-build-message">准备中...</div>
+            </div>
+            <div class="dataset-build-percent baseline-build-percent" id="mm-build-percent">0%</div>
+        </div>
+        <div class="dataset-progress-track baseline-progress-track">
+            <div class="dataset-progress-fill baseline-progress-fill" id="mm-progress-fill"></div>
+        </div>
+        <div class="dataset-build-detail" id="mm-build-detail">等待任务启动...</div>
+    </div>
+
+    <div id="mm-train-complete" style="display: none; margin-top: 12px; padding: 12px; border-radius: 8px; background: #dcfce7; color: #166534;">
+        多模态模型训练完成，已刷新模型信息。
+    </div>
+    <div id="mm-train-error" style="display: none; margin-top: 12px; padding: 12px; border-radius: 8px; background: #fee2e2; color: #991b1b;"></div>
 </div>
 
 <div class="card">
@@ -117,12 +195,13 @@
         <div class="form-group">
             <label for="baseline-model-type">模型类型</label>
             <select id="baseline-model-type">
-                <option value="logistic">逻辑回归 (logistic)</option>
-                <option value="random_forest">随机森林 (random_forest)</option>
+                <option value="logistic">逻辑回归</option>
+                <option value="random_forest">随机森林</option>
+                <option value="lightgbm">梯度提升树（需安装扩展库）</option>
             </select>
         </div>
         <div class="form-group">
-            <label for="baseline-topk">Top-K</label>
+            <label for="baseline-topk">前 N 数量</label>
             <input type="number" id="baseline-topk" min="1" max="200" value="20">
         </div>
         <div class="form-group">
@@ -171,7 +250,7 @@
             onclick="openBaselineReportJson()"
             disabled
         >
-            查看最新报告原始 JSON
+            查看最新报告原始数据
         </button>
     </div>
     <div id="baseline-report-empty" class="dataset-empty">
@@ -190,13 +269,13 @@
         <div class="form-group">
             <label for="eval-model-type">模型类型</label>
             <select id="eval-model-type">
-                <option value="logistic">逻辑回归 (logistic)</option>
-                <option value="random_forest">随机森林 (random_forest)</option>
-                <option value="lightgbm">LightGBM (需安装 lightgbm)</option>
+                <option value="logistic">逻辑回归</option>
+                <option value="random_forest">随机森林</option>
+                <option value="lightgbm">梯度提升树（需安装扩展库）</option>
             </select>
         </div>
         <div class="form-group">
-            <label for="eval-topk">Top-K</label>
+            <label for="eval-topk">前 N 数量</label>
             <input type="number" id="eval-topk" min="1" max="200" value="20">
         </div>
         <div class="form-group">
@@ -234,7 +313,7 @@
             onclick="openEvaluationReportJson()"
             disabled
         >
-            查看最新评估原始 JSON
+            查看最新评估原始数据
         </button>
     </div>
     <div id="model-evaluate-result" class="dataset-empty" style="display: none;"></div>
@@ -246,8 +325,8 @@
         <div class="form-group">
             <label for="backtest-model-type">模型类型</label>
             <select id="backtest-model-type">
-                <option value="logistic">逻辑回归 (logistic)</option>
-                <option value="random_forest">随机森林 (random_forest)</option>
+                <option value="logistic">逻辑回归</option>
+                <option value="random_forest">随机森林</option>
             </select>
         </div>
         <div class="form-group">
@@ -258,7 +337,7 @@
             </select>
         </div>
         <div class="form-group">
-            <label for="backtest-topn">Top-N</label>
+            <label for="backtest-topn">前 N 数量</label>
             <input type="number" id="backtest-topn" min="1" max="200" value="20">
         </div>
         <div class="form-group">
@@ -292,10 +371,50 @@
             onclick="openBacktestReportJson()"
             disabled
         >
-            查看最新回测原始 JSON
+            查看最新回测原始数据
         </button>
     </div>
     <div id="backtest-result" class="dataset-empty" style="display: none;"></div>
+    <div id="backtest-visual-wrap" class="backtest-visual-wrap" style="display: none;">
+        <div class="backtest-chart-grid">
+            <div class="backtest-chart-card">
+                <div class="backtest-chart-title">回测净值曲线</div>
+                <div class="backtest-chart-canvas-wrap">
+                    <canvas id="backtest-nav-chart"></canvas>
+                </div>
+            </div>
+            <div class="backtest-chart-card">
+                <div class="backtest-chart-title">回撤曲线</div>
+                <div class="backtest-chart-canvas-wrap">
+                    <canvas id="backtest-drawdown-chart"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="backtest-holding-table-wrap">
+            <div class="backtest-chart-title">每日持仓明细</div>
+            <div id="backtest-holding-empty" class="dataset-empty" style="display: none;">
+                暂无持仓明细数据。
+            </div>
+            <div id="backtest-holding-table-container" style="display: none; overflow-x: auto;">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>交易日</th>
+                            <th>入选数量</th>
+                            <th>平均概率</th>
+                            <th>原始未来 5 日收益</th>
+                            <th>交易成本</th>
+                            <th>净收益</th>
+                            <th>换手率</th>
+                            <th>平均标签命中率</th>
+                            <th>持仓股票代码</th>
+                        </tr>
+                    </thead>
+                    <tbody id="backtest-holding-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="card">
@@ -320,6 +439,32 @@
     </div>
 </div>
 
+<div class="card">
+    <h2>🧭 样本回放（无泄漏校验）</h2>
+    <div class="dataset-form-grid">
+        <div class="form-group">
+            <label for="sample-replay-stock-code">股票代码</label>
+            <input type="text" id="sample-replay-stock-code" placeholder="例如 600519">
+        </div>
+        <div class="form-group">
+            <label for="sample-replay-trade-date">交易日（可选）</label>
+            <input type="date" id="sample-replay-trade-date">
+        </div>
+        <div class="form-group">
+            <label for="sample-replay-news-limit">新闻回放条数</label>
+            <input type="number" id="sample-replay-news-limit" min="1" max="200" value="20">
+        </div>
+    </div>
+    <div class="dataset-action-row">
+        <button id="sample-replay-btn" class="btn btn-primary" onclick="querySampleReplay()">
+            查询样本回放
+        </button>
+    </div>
+    <div id="sample-replay-result" class="dataset-empty">
+        输入股票代码后可回放某个交易日样本，检查新闻时间窗是否严格在收盘前。
+    </div>
+</div>
+
 <div id="page-toast" class="page-toast"></div>
 {% endblock %}
 
@@ -328,10 +473,15 @@
 let statusPollTimer = null;
 let lastDatasetBuildEndTime = null;
 let lastBaselineTrainEndTime = null;
+let lastMultimodalTrainEndTime = null;
 let baselineStatusSyncInitialized = false;
+let multimodalStatusSyncInitialized = false;
+let multimodalPrecheckCache = null;
 let toastTimer = null;
 let evaluateRunning = false;
 let backtestRunning = false;
+let backtestNavChart = null;
+let backtestDrawdownChart = null;
 
 const OUTPUT_NAME_MAP = {
     market_daily: '行情日线特征',
@@ -357,11 +507,11 @@ const COLUMN_NAME_MAP = {
     ret_20d: '20日收益率',
     vol_5d: '5日波动率',
     vol_20d: '20日波动率',
-    rsi: 'RSI',
-    macd: 'MACD',
+    rsi: '相对强弱指标',
+    macd: '指数平滑异同平均',
     bb_position: '布林带位置',
-    ma5_gt_ma10: 'MA5高于MA10',
-    ma10_gt_ma20: 'MA10高于MA20',
+    ma5_gt_ma10: '5日均线高于10日均线',
+    ma10_gt_ma20: '10日均线高于20日均线',
     volume_ratio: '量比',
     news_count: '新闻数量',
     weighted_sentiment: '加权情绪',
@@ -378,19 +528,20 @@ const METRIC_NAME_MAP = {
     accuracy: '准确率',
     precision: '精确率',
     recall: '召回率',
-    f1: 'F1 分数',
-    avg_precision: '平均精确率(AP)',
-    auc: 'AUC',
+    f1: 'F 值',
+    avg_precision: '平均精确率',
+    auc: '曲线下面积',
     logloss: '对数损失',
-    topk_days: 'Top-K 覆盖交易日',
-    topk_avg_count: 'Top-K 平均股票数',
-    topk_hit_rate: 'Top-K 命中率',
-    topk_avg_future_return: 'Top-K 平均未来收益率'
+    topk_days: '前 N 覆盖交易日',
+    topk_avg_count: '前 N 平均股票数',
+    topk_hit_rate: '前 N 命中率',
+    topk_avg_future_return: '前 N 平均未来收益率'
 };
 
 const MODEL_TYPE_MAP = {
     logistic: '逻辑回归',
-    random_forest: '随机森林'
+    random_forest: '随机森林',
+    lightgbm: '梯度提升树'
 };
 
 const METRIC_PERCENT_KEYS = new Set([
@@ -424,12 +575,17 @@ const METRIC_ORDER = [
 
 document.addEventListener('DOMContentLoaded', async function() {
     await loadDatasetInfo();
+    await loadMultimodalModelInfo();
     await syncDatasetBuildStatus();
     await syncBaselineTrainStatus();
+    await syncMultimodalTrainStatus();
     await syncLatestReportButtons();
+    await loadLatestEvaluationReport();
+    await loadLatestBacktestReport();
     statusPollTimer = setInterval(async () => {
         await syncDatasetBuildStatus();
         await syncBaselineTrainStatus();
+        await syncMultimodalTrainStatus();
     }, 3000);
 });
 
@@ -443,6 +599,7 @@ async function loadDatasetInfo() {
         }
 
         renderDatasetInfo(payload.data);
+        renderMultimodalPrecheck(payload.data ? payload.data.multimodal_precheck : null);
         renderBaselineReport(payload.data ? payload.data.baseline : null);
         renderBaselineSummaryFromReport(payload.data ? payload.data.baseline : null);
         updateBaselineRawJsonButton(payload.data ? payload.data.baseline : null);
@@ -451,6 +608,7 @@ async function loadDatasetInfo() {
         document.getElementById('dataset-status-text').textContent = '异常';
         document.getElementById('dataset-output-grid').innerHTML =
             `<div class="error">读取数据集信息失败: ${error.message}</div>`;
+        renderMultimodalPrecheck(null);
         updateBaselineRawJsonButton(null);
     }
 }
@@ -476,6 +634,293 @@ function renderDatasetInfo(data) {
 
     renderOutputs(data.outputs || [], rowCounts);
     renderPreview(data.preview || { columns: [], rows: [] });
+}
+
+function renderMultimodalPrecheck(precheck) {
+    multimodalPrecheckCache = precheck || null;
+
+    const inputGrid = document.getElementById('mm-input-status-grid');
+    const featureGrid = document.getElementById('mm-feature-status-grid');
+    const summaryEl = document.getElementById('mm-precheck-summary');
+    if (!inputGrid || !featureGrid || !summaryEl) {
+        return;
+    }
+
+    const inputs = Array.isArray(precheck && precheck.inputs) ? precheck.inputs : [];
+    const featureGroups = Array.isArray(precheck && precheck.feature_status && precheck.feature_status.feature_groups)
+        ? precheck.feature_status.feature_groups
+        : [];
+
+    if (!inputs.length) {
+        inputGrid.innerHTML = '<div class="dataset-empty">未检测到输入数据集状态</div>';
+    } else {
+        inputGrid.innerHTML = inputs.map(item => {
+            const ready = !!item.ready;
+            const color = ready ? '#166534' : '#991b1b';
+            const bg = ready ? '#dcfce7' : '#fee2e2';
+            const path = item.path || '-';
+            const rowCount = item.row_count || 0;
+            return `
+                <div style="border-radius:8px; padding:10px; background:${bg}; color:${color};">
+                    <div style="font-weight:600;">${escapeHtml(item.name || '-')}</div>
+                    <div style="font-size:12px; margin-top:4px;">${ready ? '已构建' : '缺失'}</div>
+                    <div style="font-size:12px; margin-top:4px;">行数: ${rowCount}</div>
+                    <div style="font-size:11px; margin-top:4px; word-break: break-all;" title="${escapeHtml(path)}">${escapeHtml(path)}</div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    if (!featureGroups.length) {
+        featureGrid.innerHTML = '<div class="dataset-empty">未检测到特征状态</div>';
+    } else {
+        featureGrid.innerHTML = featureGroups.map(item => {
+            const ready = !!item.ready;
+            const color = ready ? '#166534' : '#991b1b';
+            const bg = ready ? '#dcfce7' : '#fee2e2';
+            const missing = Array.isArray(item.missing) ? item.missing : [];
+            return `
+                <div style="border-radius:8px; padding:10px; background:${bg}; color:${color};">
+                    <div style="font-weight:600;">${escapeHtml(item.label || item.name || '-')}</div>
+                    <div style="font-size:12px; margin-top:4px;">${ready ? '可用' : '缺失'}</div>
+                    <div style="font-size:11px; margin-top:4px;">
+                        ${ready ? escapeHtml(item.hint || '') : `缺少: ${escapeHtml(missing.join(', ') || '-')}`}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    const inputReady = inputs.length > 0 && inputs.every(item => !!item.ready);
+    const featureReady = featureGroups.length > 0 && featureGroups.every(item => !!item.ready);
+    const tfReady = !!(precheck && precheck.tensorflow_available);
+    const finalReady = inputReady && tfReady;
+
+    if (finalReady) {
+        const suffix = featureReady ? '四类特征状态正常，可开始 heavy 模型训练。' : '可训练，但部分特征分组缺失，建议先补齐后再训。';
+        summaryEl.style.background = '#dcfce7';
+        summaryEl.style.color = '#166534';
+        summaryEl.textContent = `训练前置检查通过。${suffix}`;
+    } else {
+        summaryEl.style.background = '#fee2e2';
+        summaryEl.style.color = '#991b1b';
+        if (!tfReady) {
+            summaryEl.textContent = '当前环境未启用 TensorFlow，无法进行多模态模型训练。';
+        } else {
+            summaryEl.textContent = '训练前置检查未通过：请先完成 model_dataset / market_daily / news_raw 构建。';
+        }
+    }
+
+    updateMultimodalTrainButtonState(false);
+}
+
+async function loadMultimodalModelInfo() {
+    const detailsEl = document.getElementById('mm-model-details');
+    if (!detailsEl) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/model/info');
+        const payload = await response.json();
+        const model = payload.model || null;
+
+        if (!model) {
+            detailsEl.innerHTML = '<div style="color:#92400e;">尚未发现可用模型，训练后会在这里显示版本信息。</div>';
+            return;
+        }
+
+        const metrics = model.final_metrics || {};
+        const featureDims = model.feature_dims || {};
+        const valAcc = metrics.val_accuracy;
+        const valAuc = metrics.val_auc;
+
+        detailsEl.innerHTML = `
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:8px;">
+                <div><span style="color:#64748b;">运行后端</span><br><strong>${escapeHtml(model.runtime_backend || model.backend || '-')}</strong></div>
+                <div><span style="color:#64748b;">模型模式</span><br><strong>${escapeHtml(model.model_tier || 'heavy')}</strong></div>
+                <div><span style="color:#64748b;">训练样本</span><br><strong>${model.training_samples || 0}</strong></div>
+                <div><span style="color:#64748b;">文本维度</span><br><strong>${featureDims.text || 0}</strong></div>
+                <div><span style="color:#64748b;">验证准确率</span><br><strong>${valAcc !== undefined && valAcc !== null ? `${(valAcc * 100).toFixed(2)}%` : '-'}</strong></div>
+                <div><span style="color:#64748b;">验证AUC</span><br><strong>${valAuc !== undefined && valAuc !== null ? Number(valAuc).toFixed(4) : '-'}</strong></div>
+            </div>
+            ${model.candidate_only ? '<div style="margin-top:8px; color:#92400e;">当前版本未超过结构化基线，仅保存为候选模型。</div>' : ''}
+        `;
+    } catch (error) {
+        console.error('加载多模态模型信息失败:', error);
+        detailsEl.innerHTML = `<div class="error">读取模型信息失败: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function updateMultimodalTrainButtonState(isTraining) {
+    const button = document.getElementById('mm-train-btn');
+    if (!button) {
+        return;
+    }
+
+    if (isTraining) {
+        button.disabled = true;
+        button.textContent = '训练中...';
+        return;
+    }
+
+    const precheck = multimodalPrecheckCache || {};
+    const inputs = Array.isArray(precheck.inputs) ? precheck.inputs : [];
+    const inputReady = inputs.length > 0 && inputs.every(item => !!item.ready);
+    const tfReady = !!precheck.tensorflow_available;
+    const canStart = inputReady && tfReady;
+
+    button.disabled = !canStart;
+    button.textContent = '开始多模态模型训练';
+    button.title = canStart ? '使用 heavy 模式启动训练' : '请先满足训练前置条件';
+}
+
+async function startMultimodalTrain() {
+    const button = document.getElementById('mm-train-btn');
+    const panel = document.getElementById('mm-train-panel');
+    const completeEl = document.getElementById('mm-train-complete');
+    const errorEl = document.getElementById('mm-train-error');
+
+    const precheck = multimodalPrecheckCache || {};
+    const inputs = Array.isArray(precheck.inputs) ? precheck.inputs : [];
+    const inputReady = inputs.length > 0 && inputs.every(item => !!item.ready);
+    if (!inputReady || !precheck.tensorflow_available) {
+        showToast('训练前置检查未通过，请先完成数据构建或启用 TensorFlow', 'error');
+        return;
+    }
+
+    button.disabled = true;
+    button.textContent = '启动中...';
+    panel.style.display = 'block';
+    completeEl.style.display = 'none';
+    errorEl.style.display = 'none';
+    updateMultimodalPanel({
+        progress: 0,
+        message: '正在提交任务...',
+        error: null,
+    });
+
+    try {
+        const response = await fetch('/api/model/train', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                stocks: parseInt(document.getElementById('mm-train-stocks').value || '80', 10),
+                days: parseInt(document.getElementById('mm-train-days').value || '240', 10),
+                epochs: parseInt(document.getElementById('mm-train-epochs').value || '60', 10),
+            })
+        });
+
+        const payload = await response.json();
+        if (!response.ok || !payload.success) {
+            if (payload.precheck) {
+                renderMultimodalPrecheck(payload.precheck);
+            }
+            throw new Error(payload.message || '启动多模态训练失败');
+        }
+
+        await syncMultimodalTrainStatus();
+    } catch (error) {
+        console.error('启动多模态训练失败:', error);
+        errorEl.style.display = 'block';
+        errorEl.textContent = `启动失败: ${error.message}`;
+        showToast(`多模态训练启动失败：${error.message}`, 'error');
+        updateMultimodalTrainButtonState(false);
+    }
+}
+
+async function syncMultimodalTrainStatus() {
+    try {
+        const response = await fetch('/api/model/train/status');
+        const payload = await response.json();
+        if (!payload.success) {
+            return;
+        }
+
+        const status = payload.status || {};
+        if (!multimodalStatusSyncInitialized) {
+            multimodalStatusSyncInitialized = true;
+            if (status.end_time) {
+                lastMultimodalTrainEndTime = status.end_time;
+            }
+        }
+
+        const panel = document.getElementById('mm-train-panel');
+        const completeEl = document.getElementById('mm-train-complete');
+        const errorEl = document.getElementById('mm-train-error');
+        const hasRuntimeInfo = !!(
+            status.is_training ||
+            status.progress > 0 ||
+            status.error ||
+            status.start_time ||
+            status.end_time
+        );
+
+        if (hasRuntimeInfo) {
+            panel.style.display = 'block';
+            updateMultimodalPanel(status);
+        }
+
+        if (status.is_training) {
+            completeEl.style.display = 'none';
+            errorEl.style.display = 'none';
+            updateMultimodalTrainButtonState(true);
+        } else {
+            updateMultimodalTrainButtonState(false);
+
+            if (status.error) {
+                errorEl.style.display = 'block';
+                errorEl.textContent = status.error;
+                completeEl.style.display = 'none';
+            } else if (status.progress === 100) {
+                completeEl.style.display = 'block';
+                errorEl.style.display = 'none';
+            }
+
+            if (status.end_time && status.end_time !== lastMultimodalTrainEndTime) {
+                lastMultimodalTrainEndTime = status.end_time;
+                await loadDatasetInfo();
+                await loadMultimodalModelInfo();
+                if (status.error) {
+                    showToast(`多模态训练失败：${status.error}`, 'error');
+                } else {
+                    showToast('多模态训练完成，已刷新模型信息', 'success');
+                }
+            }
+        }
+    } catch (error) {
+        console.error('同步多模态训练状态失败:', error);
+    }
+}
+
+function updateMultimodalPanel(status) {
+    const progress = status.progress || 0;
+    const message = status.message || '等待任务启动...';
+    const error = status.error || null;
+
+    document.getElementById('mm-progress-fill').style.width = `${progress}%`;
+    document.getElementById('mm-build-percent').textContent = `${progress}%`;
+    document.getElementById('mm-build-message').textContent = message;
+
+    const detailEl = document.getElementById('mm-build-detail');
+    if (error) {
+        detailEl.textContent = error;
+        detailEl.style.color = '#b42318';
+        return;
+    }
+
+    detailEl.style.color = '#5f6b7a';
+    if (status.start_time) {
+        detailEl.textContent = `任务开始时间: ${formatDateTime(status.start_time)}`;
+    } else {
+        detailEl.textContent = '等待任务启动...';
+    }
+}
+
+async function refreshMultimodalPrecheck() {
+    await loadDatasetInfo();
+    await loadMultimodalModelInfo();
+    await syncMultimodalTrainStatus();
 }
 
 function renderOutputs(outputs, rowCounts) {
@@ -530,6 +975,137 @@ function renderPreview(preview) {
     `).join('');
 }
 
+async function querySampleReplay() {
+    const stockCode = (document.getElementById('sample-replay-stock-code').value || '').trim();
+    const tradeDate = (document.getElementById('sample-replay-trade-date').value || '').trim();
+    const newsLimit = parseInt(document.getElementById('sample-replay-news-limit').value || '20', 10);
+    const resultEl = document.getElementById('sample-replay-result');
+    const button = document.getElementById('sample-replay-btn');
+
+    if (!stockCode) {
+        resultEl.innerHTML = '<div class="error">请输入股票代码</div>';
+        return;
+    }
+
+    button.disabled = true;
+    button.textContent = '查询中...';
+    resultEl.innerHTML = '<div class="loading">正在回放样本，请稍候</div>';
+
+    try {
+        const params = new URLSearchParams();
+        if (tradeDate) {
+            params.set('trade_date', tradeDate);
+        }
+        params.set('news_limit', String(Number.isFinite(newsLimit) ? newsLimit : 20));
+
+        const url = `/api/dataset/sample/${encodeURIComponent(stockCode)}?${params.toString()}`;
+        const response = await fetch(url);
+        const payload = await response.json();
+        if (!response.ok || !payload.success) {
+            throw new Error(payload.message || '样本回放失败');
+        }
+
+        renderSampleReplayResult(payload.data || {});
+    } catch (error) {
+        console.error('查询样本回放失败:', error);
+        resultEl.innerHTML = `<div class="error">样本回放失败: ${escapeHtml(error.message)}</div>`;
+    } finally {
+        button.disabled = false;
+        button.textContent = '查询样本回放';
+    }
+}
+
+function renderSampleReplayResult(data) {
+    const resultEl = document.getElementById('sample-replay-result');
+    if (!data || !data.available) {
+        const dates = Array.isArray(data.available_dates) ? data.available_dates.slice(-10).join('、') : '';
+        resultEl.innerHTML = `
+            <div class="dataset-empty">
+                ${escapeHtml((data && data.message) || '暂无可回放样本')}
+                ${dates ? `<div style="margin-top: 8px; color: #64748b;">最近可用日期：${escapeHtml(dates)}</div>` : ''}
+            </div>
+        `;
+        return;
+    }
+
+    const windowInfo = data.news_window || {};
+    const statusColor = windowInfo.strict_time_check_passed ? '#16a34a' : '#dc2626';
+    const statusText = windowInfo.strict_time_check_passed ? '通过' : '未通过';
+    const newsRows = Array.isArray(data.used_news) ? data.used_news : [];
+    const featureEntries = Object.entries(data.feature_snapshot || {}).slice(0, 60);
+
+    const featureTable = featureEntries.length
+        ? `
+            <div style="margin-top: 12px;">
+                <div class="backtest-chart-title">样本特征快照（前 60 个字段）</div>
+                <div style="overflow-x:auto;">
+                    <table class="table">
+                        <thead>
+                            <tr><th>字段</th><th>值</th></tr>
+                        </thead>
+                        <tbody>
+                            ${featureEntries.map(([key, value]) => `
+                                <tr>
+                                    <td>${escapeHtml(getColumnLabel(key))}</td>
+                                    <td>${formatCell(value)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `
+        : '<div class="dataset-empty" style="margin-top: 12px;">暂无特征快照</div>';
+
+    const newsTable = newsRows.length
+        ? `
+            <div style="margin-top: 12px;">
+                <div class="backtest-chart-title">时间窗内新闻明细（按发布时间倒序）</div>
+                <div style="overflow-x:auto;">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>发布时间</th>
+                                <th>来源</th>
+                                <th>标题</th>
+                                <th>情绪</th>
+                                <th>重要性</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${newsRows.map(item => `
+                                <tr>
+                                    <td>${escapeHtml(item.publish_time || '-')}</td>
+                                    <td>${escapeHtml(item.source || '-')}</td>
+                                    <td title="${escapeHtml(item.title || '-')}">${escapeHtml(item.title || '-')}</td>
+                                    <td>${formatCell(item.sentiment)}</td>
+                                    <td>${formatCell(item.importance)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `
+        : '<div class="dataset-empty" style="margin-top: 12px;">该时间窗内无新闻明细</div>';
+
+    resultEl.innerHTML = `
+        <div class="result-kv-grid">
+            <div class="result-kv-item"><span>股票代码</span><strong>${escapeHtml(data.stock_code || '-')}</strong></div>
+            <div class="result-kv-item"><span>样本日期</span><strong>${escapeHtml(data.trade_date || '-')}</strong></div>
+            <div class="result-kv-item"><span>5日上涨标签</span><strong>${data.label_up_5d ?? '-'}</strong></div>
+            <div class="result-kv-item"><span>未来5日收益率</span><strong>${formatMetricValue('topk_avg_future_return', data.future_ret_5d)}</strong></div>
+            <div class="result-kv-item"><span>时间窗起点</span><strong>${escapeHtml(windowInfo.start || '-')}</strong></div>
+            <div class="result-kv-item"><span>时间窗终点</span><strong>${escapeHtml(windowInfo.end || '-')}</strong></div>
+            <div class="result-kv-item"><span>窗口内新闻数</span><strong>${windowInfo.used_news_count ?? 0}</strong></div>
+            <div class="result-kv-item"><span>收盘后新闻数</span><strong>${windowInfo.future_news_count_after_close ?? 0}</strong></div>
+            <div class="result-kv-item"><span>时间泄漏校验</span><strong style="color:${statusColor};">${statusText}</strong></div>
+        </div>
+        ${featureTable}
+        ${newsTable}
+    `;
+}
+
 function renderBaselineSummaryFromReport(report) {
     const statusCard = document.getElementById('baseline-status-card');
     const statusText = document.getElementById('baseline-status-text');
@@ -567,7 +1143,7 @@ function renderBaselineReport(report) {
         <div class="baseline-meta-item"><span>训练时间</span><strong>${formatDateTime(report.created_at)}</strong></div>
         <div class="baseline-meta-item"><span>模型类型</span><strong>${escapeHtml(getModelLabel(report.model_type))}</strong></div>
         <div class="baseline-meta-item"><span>特征数量</span><strong>${report.feature_count || 0}</strong></div>
-        <div class="baseline-meta-item"><span>Top-K</span><strong>${report.top_k || '-'}</strong></div>
+        <div class="baseline-meta-item"><span>前 N 数量</span><strong>${report.top_k || '-'}</strong></div>
         <div class="baseline-meta-item"><span>训练样本</span><strong>${split.train_samples || 0}</strong></div>
         <div class="baseline-meta-item"><span>验证样本</span><strong>${split.valid_samples || 0}</strong></div>
         <div class="baseline-meta-item"><span>测试样本</span><strong>${split.test_samples || 0}</strong></div>
@@ -585,7 +1161,7 @@ function renderBaselineReport(report) {
     }
 
     featureWrap.innerHTML = `
-        <div class="baseline-feature-title">Top 10 特征重要性</div>
+        <div class="baseline-feature-title">前 10 特征重要性</div>
         <div class="baseline-feature-grid">
             ${topFeatures.map((item, idx) => `
                 <div class="baseline-feature-item">
@@ -608,7 +1184,7 @@ function updateBaselineRawJsonButton(report) {
 
     const hasReport = !!report;
     button.disabled = !hasReport;
-    button.title = hasReport ? '在新标签页中打开最新基线报告原始 JSON' : '暂无可查看报告';
+    button.title = hasReport ? '在新标签页中打开最新基线报告原始数据' : '暂无可查看报告';
 }
 
 function openBaselineReportJson() {
@@ -632,6 +1208,64 @@ async function syncLatestReportButtons() {
         document.getElementById('backtest-json-btn').disabled = !backtestResp.ok;
     } catch (error) {
         console.error('同步最新报告按钮状态失败:', error);
+    }
+}
+
+async function loadLatestEvaluationReport() {
+    const resultEl = document.getElementById('model-evaluate-result');
+    if (!resultEl) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/model/evaluate/report/latest');
+        if (!response.ok) {
+            resultEl.style.display = 'none';
+            return;
+        }
+
+        const report = await response.json();
+        renderEvaluationResult({
+            report_path: report.report_path || report.latest_path || '-',
+            holdout_results: report.holdout_results || {},
+            holdout_uplift_full_vs_tech: report.holdout_uplift_full_vs_tech || {},
+            rolling_summary: report.rolling_summary || {},
+            rolling_windows: Array.isArray(report.rolling_results) ? report.rolling_results.length : (report.rolling_windows || 0)
+        });
+    } catch (error) {
+        console.error('加载最新离线评估报告失败:', error);
+    }
+}
+
+async function loadLatestBacktestReport() {
+    const resultEl = document.getElementById('backtest-result');
+    if (!resultEl) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/backtest/cross-section/report/latest');
+        if (!response.ok) {
+            resultEl.style.display = 'none';
+            clearBacktestVisual();
+            return;
+        }
+
+        const report = await response.json();
+        const data = {
+            report_path: report.report_path || report.latest_path || '-',
+            summary: report.summary || {},
+            split: report.split || {},
+            sector_distribution: report.sector_distribution || {},
+            equity_curve_points: Array.isArray(report.equity_curve) ? report.equity_curve.length : 0,
+            holding_days: Array.isArray(report.daily_holdings) ? report.daily_holdings.length : 0,
+            equity_curve: report.equity_curve || [],
+            daily_holdings: report.daily_holdings || []
+        };
+        renderBacktestResult(data);
+        renderBacktestVisual(data);
+    } catch (error) {
+        console.error('加载最新截面回测报告失败:', error);
     }
 }
 
@@ -698,15 +1332,15 @@ function renderEvaluationResult(data) {
     resultEl.style.display = 'block';
     resultEl.innerHTML = `
         <div class="result-kv-grid">
-            <div class="result-kv-item"><span>技术面 AUC</span><strong>${formatMetricValue('auc', techTest.auc)}</strong></div>
-            <div class="result-kv-item"><span>全特征 AUC</span><strong>${formatMetricValue('auc', fullTest.auc)}</strong></div>
-            <div class="result-kv-item"><span>AUC 增量</span><strong>${formatSignedMetric('auc', uplift.auc)}</strong></div>
-            <div class="result-kv-item"><span>技术面 Top-K收益</span><strong>${formatMetricValue('topk_avg_future_return', techTest.topk_avg_future_return)}</strong></div>
-            <div class="result-kv-item"><span>全特征 Top-K收益</span><strong>${formatMetricValue('topk_avg_future_return', fullTest.topk_avg_future_return)}</strong></div>
-            <div class="result-kv-item"><span>Top-K收益增量</span><strong>${formatSignedMetric('topk_avg_future_return', uplift.topk_avg_future_return)}</strong></div>
+            <div class="result-kv-item"><span>技术面曲线面积</span><strong>${formatMetricValue('auc', techTest.auc)}</strong></div>
+            <div class="result-kv-item"><span>全特征曲线面积</span><strong>${formatMetricValue('auc', fullTest.auc)}</strong></div>
+            <div class="result-kv-item"><span>曲线面积增量</span><strong>${formatSignedMetric('auc', uplift.auc)}</strong></div>
+            <div class="result-kv-item"><span>技术面前 N 收益</span><strong>${formatMetricValue('topk_avg_future_return', techTest.topk_avg_future_return)}</strong></div>
+            <div class="result-kv-item"><span>全特征前 N 收益</span><strong>${formatMetricValue('topk_avg_future_return', fullTest.topk_avg_future_return)}</strong></div>
+            <div class="result-kv-item"><span>前 N 收益增量</span><strong>${formatSignedMetric('topk_avg_future_return', uplift.topk_avg_future_return)}</strong></div>
             <div class="result-kv-item"><span>滚动窗口数</span><strong>${rolling.windows || data.rolling_windows || 0}</strong></div>
-            <div class="result-kv-item"><span>滚动平均AUC增量</span><strong>${formatSignedMetric('auc', rolling.avg_uplift_auc)}</strong></div>
-            <div class="result-kv-item"><span>AUC正增量窗口</span><strong>${rolling.positive_auc_windows || 0}</strong></div>
+            <div class="result-kv-item"><span>滚动平均曲线面积增量</span><strong>${formatSignedMetric('auc', rolling.avg_uplift_auc)}</strong></div>
+            <div class="result-kv-item"><span>曲线面积正增量窗口</span><strong>${rolling.positive_auc_windows || 0}</strong></div>
         </div>
         <div class="dataset-output-path" style="margin-top: 12px;">
             评估报告: ${escapeHtml(data.report_path || '-')}
@@ -735,6 +1369,7 @@ async function runCrossSectionBacktest() {
     button.textContent = '回测中...';
     resultEl.style.display = 'block';
     resultEl.innerHTML = '<div class="loading">正在运行截面回测，请稍候</div>';
+    clearBacktestVisual();
 
     const datasetPath = document.getElementById('backtest-dataset-path').value.trim();
 
@@ -762,11 +1397,13 @@ async function runCrossSectionBacktest() {
         }
 
         renderBacktestResult(payload.data || {});
+        renderBacktestVisual(payload.data || {});
         document.getElementById('backtest-json-btn').disabled = false;
         showToast('截面回测完成', 'success');
     } catch (error) {
         console.error('运行截面回测失败:', error);
         resultEl.innerHTML = `<div class="error">截面回测失败: ${escapeHtml(error.message)}</div>`;
+        clearBacktestVisual();
         showToast(`截面回测失败：${error.message}`, 'error');
     } finally {
         backtestRunning = false;
@@ -806,6 +1443,196 @@ function renderBacktestResult(data) {
             主要行业暴露: ${escapeHtml(topSectors || '暂无')}
         </div>
     `;
+}
+
+function renderBacktestVisual(data) {
+    const wrap = document.getElementById('backtest-visual-wrap');
+    const equityCurve = Array.isArray(data.equity_curve) ? data.equity_curve : [];
+    const holdings = Array.isArray(data.daily_holdings) ? data.daily_holdings : [];
+
+    if (!equityCurve.length && !holdings.length) {
+        clearBacktestVisual();
+        return;
+    }
+
+    wrap.style.display = 'block';
+    renderBacktestCharts(equityCurve);
+    renderBacktestHoldingTable(holdings);
+}
+
+function renderBacktestCharts(equityCurve) {
+    const labels = equityCurve.map(item => formatDateForAxis(item.trade_date));
+    const navSeries = equityCurve.map(item => Number(item.nav || 0));
+    const drawdownSeries = equityCurve.map(item => Number(item.drawdown || 0) * 100);
+
+    const navCanvas = document.getElementById('backtest-nav-chart');
+    const drawdownCanvas = document.getElementById('backtest-drawdown-chart');
+    if (!navCanvas || !drawdownCanvas || typeof Chart === 'undefined') {
+        return;
+    }
+
+    if (backtestNavChart) {
+        backtestNavChart.destroy();
+        backtestNavChart = null;
+    }
+    if (backtestDrawdownChart) {
+        backtestDrawdownChart.destroy();
+        backtestDrawdownChart = null;
+    }
+
+    backtestNavChart = new Chart(navCanvas.getContext('2d'), {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: '回测净值',
+                data: navSeries,
+                borderColor: '#2563eb',
+                backgroundColor: 'rgba(37, 99, 235, 0.12)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.25,
+                pointRadius: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: true
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return `净值: ${Number(context.parsed.y).toFixed(4)}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: {
+                        maxTicksLimit: 8
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: '净值'
+                    }
+                }
+            }
+        }
+    });
+
+    backtestDrawdownChart = new Chart(drawdownCanvas.getContext('2d'), {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: '回撤',
+                data: drawdownSeries,
+                borderColor: '#dc2626',
+                backgroundColor: 'rgba(220, 38, 38, 0.12)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.25,
+                pointRadius: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: true
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return `回撤: ${Number(context.parsed.y).toFixed(2)}%`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: {
+                        maxTicksLimit: 8
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: '回撤(%)'
+                    }
+                }
+            }
+        }
+    });
+}
+
+function renderBacktestHoldingTable(holdings) {
+    const empty = document.getElementById('backtest-holding-empty');
+    const wrap = document.getElementById('backtest-holding-table-container');
+    const body = document.getElementById('backtest-holding-body');
+
+    if (!Array.isArray(holdings) || !holdings.length) {
+        empty.style.display = 'block';
+        wrap.style.display = 'none';
+        body.innerHTML = '';
+        return;
+    }
+
+    empty.style.display = 'none';
+    wrap.style.display = 'block';
+
+    body.innerHTML = holdings.map(item => {
+        const codes = Array.isArray(item.selected_codes) ? item.selected_codes.join(', ') : '-';
+        return `
+            <tr>
+                <td>${escapeHtml(formatDateForAxis(item.trade_date))}</td>
+                <td>${item.selected_count ?? '-'}</td>
+                <td>${formatMetricValue('accuracy', item.avg_probability)}</td>
+                <td>${formatMetricValue('topk_avg_future_return', item.raw_future_return_5d)}</td>
+                <td>${formatMetricValue('topk_avg_future_return', item.trade_cost)}</td>
+                <td>${formatMetricValue('topk_avg_future_return', item.net_return)}</td>
+                <td>${formatMetricValue('accuracy', item.turnover)}</td>
+                <td>${formatMetricValue('accuracy', item.avg_label)}</td>
+                <td title="${escapeHtml(codes)}">${escapeHtml(codes)}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function clearBacktestVisual() {
+    const wrap = document.getElementById('backtest-visual-wrap');
+    const empty = document.getElementById('backtest-holding-empty');
+    const tableWrap = document.getElementById('backtest-holding-table-container');
+    const body = document.getElementById('backtest-holding-body');
+
+    if (backtestNavChart) {
+        backtestNavChart.destroy();
+        backtestNavChart = null;
+    }
+    if (backtestDrawdownChart) {
+        backtestDrawdownChart.destroy();
+        backtestDrawdownChart = null;
+    }
+
+    if (wrap) {
+        wrap.style.display = 'none';
+    }
+    if (empty) {
+        empty.style.display = 'none';
+    }
+    if (tableWrap) {
+        tableWrap.style.display = 'none';
+    }
+    if (body) {
+        body.innerHTML = '';
+    }
 }
 
 function openBacktestReportJson() {
@@ -1090,7 +1917,7 @@ function updateBaselinePanel(status) {
     detailEl.style.color = '#5f6b7a';
     if (result && result.metrics && result.metrics.test) {
         const testMetrics = result.metrics.test;
-        detailEl.textContent = `测试集 AUC: ${formatMetricValue('auc', testMetrics.auc)} | F1: ${formatMetricValue('f1', testMetrics.f1)}`;
+        detailEl.textContent = `测试集曲线面积: ${formatMetricValue('auc', testMetrics.auc)} | F值: ${formatMetricValue('f1', testMetrics.f1)}`;
     } else {
         detailEl.textContent = status.start_time ? `任务开始时间: ${formatDateTime(status.start_time)}` : '等待任务启动...';
     }
@@ -1158,12 +1985,23 @@ function formatDateTime(value) {
     });
 }
 
+function formatDateForAxis(value) {
+    if (!value) {
+        return '-';
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return String(value).slice(0, 10);
+    }
+    return date.toLocaleDateString('zh-CN');
+}
+
 function formatBytes(bytes) {
     if (!bytes) {
-        return '0 B';
+        return '0 字节';
     }
 
-    const units = ['B', 'KB', 'MB', 'GB'];
+    const units = ['字节', '千字节', '兆字节', '吉字节'];
     let size = bytes;
     let unitIndex = 0;
 

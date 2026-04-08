@@ -1,464 +1,666 @@
 {% extends "base.html" %}
 
 {% block content %}
-<!-- 系统概览 -->
-<div class="card">
-    <h2>🎯 系统概览</h2>
-    <div class="stats-grid">
-        <div class="stat-card">
-            <div class="label">数据源状态</div>
-            <div class="value">✓ 正常</div>
+<div class="galaxy-home" id="galaxy-home">
+    <canvas id="starfield-canvas" class="starfield-canvas" aria-hidden="true"></canvas>
+
+    <div class="system-map" id="system-map">
+        <svg class="map-link-layer" viewBox="0 0 1600 920" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+                <linearGradient id="linkGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stop-color="#06b6d4" />
+                    <stop offset="55%" stop-color="#60a5fa" />
+                    <stop offset="100%" stop-color="#a78bfa" />
+                </linearGradient>
+            </defs>
+
+            <path class="map-link" d="M173 154 C230 154, 274 154, 331 154" />
+            <path class="map-link pulse" d="M173 154 C230 154, 274 154, 331 154" />
+
+            <path class="map-link" d="M173 430 C230 430, 274 430, 331 430" />
+            <path class="map-link pulse" d="M173 430 C230 430, 274 430, 331 430" />
+
+            <path class="map-link" d="M501 154 C560 186, 568 242, 619 311" />
+            <path class="map-link pulse" d="M501 154 C560 186, 568 242, 619 311" />
+
+            <path class="map-link" d="M501 430 C560 398, 568 350, 619 311" />
+            <path class="map-link pulse" d="M501 430 C560 398, 568 350, 619 311" />
+
+            <path class="map-link" d="M789 311 C820 311, 844 311, 875 311" />
+            <path class="map-link pulse" d="M789 311 C820 311, 844 311, 875 311" />
+
+            <path class="map-link" d="M1045 311 C1070 260, 1080 190, 1099 154" />
+            <path class="map-link pulse" d="M1045 311 C1070 260, 1080 190, 1099 154" />
+
+            <path class="map-link" d="M1045 311 C1070 311, 1080 311, 1099 311" />
+            <path class="map-link pulse" d="M1045 311 C1070 311, 1080 311, 1099 311" />
+
+            <path class="map-link" d="M1045 311 C1070 360, 1080 430, 1099 467" />
+            <path class="map-link pulse" d="M1045 311 C1070 360, 1080 430, 1099 467" />
+
+            <path class="map-link" d="M1045 311 C1070 430, 1080 560, 1099 624" />
+            <path class="map-link pulse" d="M1045 311 C1070 430, 1080 560, 1099 624" />
+
+            <path class="map-link" d="M1269 154 C1300 144, 1320 138, 1358 136" />
+            <path class="map-link pulse" d="M1269 154 C1300 144, 1320 138, 1358 136" />
+
+            <path class="map-link" d="M1269 311 C1300 306, 1320 303, 1358 302" />
+            <path class="map-link pulse" d="M1269 311 C1300 306, 1320 303, 1358 302" />
+
+            <path class="map-link" d="M1269 467 C1300 470, 1320 474, 1358 476" />
+            <path class="map-link pulse" d="M1269 467 C1300 470, 1320 474, 1358 476" />
+
+            <path class="map-link" d="M1269 624 C1300 640, 1320 658, 1358 670" />
+            <path class="map-link pulse" d="M1269 624 C1300 640, 1320 658, 1358 670" />
+
+            <path class="map-link" d="M173 716 C540 808, 1010 786, 1358 670" />
+            <path class="map-link pulse" d="M173 716 C540 808, 1010 786, 1358 670" />
+        </svg>
+
+        <div class="system-zone zone-external">
+            <div class="zone-title">外部系统</div>
+            <div class="zone-subtitle">第三方数据提供方 + 用户访问入口</div>
         </div>
-        <div class="stat-card">
-            <div class="label">
-                可用股票
-                <button
-                    id="refresh-stocks-btn"
-                    onclick="refreshStockList()"
-                    style="margin-left: 10px; padding: 5px 12px; font-size: 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;"
-                    title="刷新股票列表">
-                    🔄 刷新
-                </button>
-            </div>
-            <div class="value" id="stock-count">-</div>
+
+        <div class="system-zone zone-internal">
+            <div class="zone-title">本系统（多模态股票预测系统）</div>
+            <div class="zone-subtitle">数据采集层 → 特征工程层 → 模型训练层 → 预测服务层</div>
         </div>
-        <div class="stat-card" id="model-status-card">
-            <div class="label">多模态模型状态</div>
-            <div class="value" id="model-status">-</div>
-        </div>
-        <div class="stat-card">
-            <div class="label">系统状态</div>
-            <div class="value" id="system-status">-</div>
-        </div>
+
+        <div class="system-subzone subzone-collect"><span>采集层</span></div>
+        <div class="system-subzone subzone-feature"><span>特征层</span></div>
+        <div class="system-subzone subzone-model"><span>模型层</span></div>
+        <div class="system-subzone subzone-service"><span>服务层</span></div>
+
+        <div class="flow-label" style="left: 19%; top: 17%;">行情原始数据流</div>
+        <div class="flow-label" style="left: 19%; top: 47%;">新闻原始文本流</div>
+        <div class="flow-label" style="left: 40%; top: 24%;">技术指标抽取</div>
+        <div class="flow-label" style="left: 40%; top: 40%;">新闻特征聚合</div>
+        <div class="flow-label" style="left: 56%; top: 31%;">按股票+交易日对齐</div>
+        <div class="flow-label" style="left: 68%; top: 21%;">训练基线模型</div>
+        <div class="flow-label" style="left: 68%; top: 32%;">多模态融合训练</div>
+        <div class="flow-label" style="left: 68%; top: 43%;">离线评估对比</div>
+        <div class="flow-label" style="left: 68%; top: 56%;">回测策略验证</div>
+        <a
+            class="map-node node-external"
+            style="left: 5.5%; top: 12%;"
+            href="/stock"
+            data-title="行情数据源"
+            data-type="外部系统 / 数据提供方"
+            data-elements="股票列表接口|日线K线接口|成交量与涨跌幅数据|公司基础资料接口"
+            data-desc="系统通过数据管理器定期拉取行情和公司信息，作为所有结构化特征的底层输入。"
+            data-input="第三方行情平台实时与历史数据"
+            data-output="行情原始表（按股票、日期）"
+            data-flow="向“行情采集模块”输出标准化行情流"
+            data-link="进入单股信息页面"
+        >
+            <span class="node-icon">🌐</span>
+            <span class="node-title">外部：行情数据源</span>
+            <span class="node-kind">数据源</span>
+        </a>
+
+        <a
+            class="map-node node-external"
+            style="left: 5.5%; top: 42%;"
+            href="/news"
+            data-title="新闻数据源"
+            data-type="外部系统 / 数据提供方"
+            data-elements="东方财富新闻源|新浪财经新闻源|腾讯财经新闻源|发布时间与来源字段"
+            data-desc="系统多源抓取财经新闻，后续进行清洗、去重、情绪和重要性计算。"
+            data-input="财经资讯站点原始新闻文本"
+            data-output="新闻原始明细"
+            data-flow="向“新闻采集模块”输出新闻文本流"
+            data-link="进入新闻中心"
+        >
+            <span class="node-icon">🗞️</span>
+            <span class="node-title">外部：新闻数据源</span>
+            <span class="node-kind">数据源</span>
+        </a>
+
+        <a
+            class="map-node node-external"
+            style="left: 5.5%; top: 73%;"
+            href="/overview"
+            data-title="用户与运维入口"
+            data-type="外部系统 / 使用方"
+            data-elements="前端页面访问|参数配置提交|训练任务触发|结果查看与回放"
+            data-desc="用户通过页面发起训练、回测、预测任务，并消费系统输出结果。"
+            data-input="用户操作请求"
+            data-output="任务调度信号与查询请求"
+            data-flow="请求进入本系统 API 层形成闭环"
+            data-link="进入总览"
+        >
+            <span class="node-icon">👤</span>
+            <span class="node-title">外部：用户入口</span>
+            <span class="node-kind">访问端</span>
+        </a>
+
+        <a
+            class="map-node node-internal"
+            style="left: 26%; top: 12%;"
+            href="/dataset"
+            data-title="行情采集模块"
+            data-type="本系统 / 采集层"
+            data-elements="拉取股票池行情|缓存到 data/raw|生成 market_daily|字段标准化与缺失补齐"
+            data-desc="负责把外部行情转成系统统一字段，并缓存为后续特征工程可直接消费的表。"
+            data-input="外部行情数据源"
+            data-output="market_daily（行情日线特征）"
+            data-flow="输出到特征融合模块"
+            data-link="进入模型训练"
+        >
+            <span class="node-icon">📥</span>
+            <span class="node-title">本系统：行情采集</span>
+            <span class="node-kind">采集层</span>
+        </a>
+
+        <a
+            class="map-node node-internal"
+            style="left: 26%; top: 42%;"
+            href="/news"
+            data-title="新闻采集与清洗模块"
+            data-type="本系统 / 采集层"
+            data-elements="新闻去重清洗|发布时间对齐|情绪分计算|重要性打分|来源与行业标签"
+            data-desc="将新闻文本转成可量化字段，形成按交易日聚合的新闻特征。"
+            data-input="外部新闻数据源"
+            data-output="news_raw（新闻明细） + news_daily_features（新闻日级特征）"
+            data-flow="输出到特征融合模块"
+            data-link="进入新闻中心"
+        >
+            <span class="node-icon">🧹</span>
+            <span class="node-title">本系统：新闻清洗</span>
+            <span class="node-kind">采集层</span>
+        </a>
+
+        <a
+            class="map-node node-internal"
+            style="left: 44%; top: 29%;"
+            href="/dataset"
+            data-title="特征融合模块"
+            data-type="本系统 / 特征层"
+            data-elements="技术指标计算|新闻日级特征聚合|静态关联特征拼接|标签生成（未来收益）"
+            data-desc="把行情特征、新闻特征和静态特征融合为统一样本口径。"
+            data-input="market_daily + news_daily_features + 静态特征"
+            data-output="多模态候选特征矩阵"
+            data-flow="输出到数据集构建模块"
+            data-link="进入模型训练"
+        >
+            <span class="node-icon">🧬</span>
+            <span class="node-title">本系统：特征融合</span>
+            <span class="node-kind">特征层</span>
+        </a>
+
+        <a
+            class="map-node node-internal"
+            style="left: 60%; top: 29%;"
+            href="/dataset"
+            data-title="数据集构建模块"
+            data-type="本系统 / 特征层"
+            data-elements="按股票代码+交易日对齐|训练/验证/测试切分准备|CSV/Parquet 输出|元数据记录"
+            data-desc="形成结构化训练样本集，作为所有训练、评估和回测任务的统一输入。"
+            data-input="融合后的特征矩阵"
+            data-output="model_dataset（模型样本集） + metadata（元数据）"
+            data-flow="分发到模型训练与评估模块"
+            data-link="进入模型训练"
+        >
+            <span class="node-icon">🧱</span>
+            <span class="node-title">本系统：数据集构建</span>
+            <span class="node-kind">特征层</span>
+        </a>
+
+        <a
+            class="map-node node-model"
+            style="left: 74%; top: 12%;"
+            href="/dataset"
+            data-title="基线模型训练模块"
+            data-type="本系统 / 模型层"
+            data-elements="逻辑回归训练|随机森林训练|梯度提升树训练|特征重要性输出|模型文件持久化"
+            data-desc="用于快速建立可解释基线，检验结构化特征是否具备预测能力。"
+            data-input="model_dataset"
+            data-output="baseline_model + 指标报告"
+            data-flow="支撑预测服务并提供可解释性基准"
+            data-link="查看基线训练"
+        >
+            <span class="node-icon">🧠</span>
+            <span class="node-title">模型层：基线训练</span>
+            <span class="node-kind">模型层</span>
+        </a>
+
+        <a
+            class="map-node node-model"
+            style="left: 74%; top: 29%;"
+            href="/overview"
+            data-title="多模态训练模块"
+            data-type="本系统 / 模型层"
+            data-elements="文本与结构化特征融合|全局模型训练|训练进度监控|模型版本替换"
+            data-desc="训练主力多模态模型，为单股和批量预测提供统一推理能力。"
+            data-input="融合特征 + 历史标签"
+            data-output="multimodal_model"
+            data-flow="为单股分析和批量预测提供推理模型"
+            data-link="进入总览训练页"
+        >
+            <span class="node-icon">🤖</span>
+            <span class="node-title">模型层：多模态训练</span>
+            <span class="node-kind">模型层</span>
+        </a>
+
+        <a
+            class="map-node node-model"
+            style="left: 74%; top: 46%;"
+            href="/dataset"
+            data-title="离线评估模块"
+            data-type="本系统 / 模型层"
+            data-elements="时间切分评估|滚动窗口评估|技术面与全特征对比|增量统计与报告输出"
+            data-desc="量化新闻特征是否有效、模型是否稳健，避免只看单次训练结果。"
+            data-input="模型预测结果 + 测试标签"
+            data-output="离线评估报告"
+            data-flow="为模型迭代提供量化反馈"
+            data-link="查看离线评估"
+        >
+            <span class="node-icon">🧪</span>
+            <span class="node-title">模型层：离线评估</span>
+            <span class="node-kind">模型层</span>
+        </a>
+
+        <a
+            class="map-node node-model"
+            style="left: 74%; top: 63%;"
+            href="/dataset"
+            data-title="截面回测模块"
+            data-type="本系统 / 模型层"
+            data-elements="前N选股|交易成本建模|净值与回撤计算|每日持仓明细输出"
+            data-desc="验证策略在真实交易约束下的可执行性与收益风险特征。"
+            data-input="预测打分 + 成本参数"
+            data-output="回测报告 + 曲线 + 持仓明细"
+            data-flow="为策略上线提供风险收益依据"
+            data-link="查看截面回测"
+        >
+            <span class="node-icon">📉</span>
+            <span class="node-title">模型层：截面回测</span>
+            <span class="node-kind">模型层</span>
+        </a>
+
+        <a
+            class="map-node node-service"
+            style="left: 90.2%; top: 10%;"
+            href="/stock"
+            data-title="单股分析服务"
+            data-type="本系统 / 服务层"
+            data-elements="单股详情查询|预测信号输出|新闻影响联动|相关性图谱入口"
+            data-desc="面向个股研究场景，提供综合分析与解释性结果。"
+            data-input="股票代码"
+            data-output="个股预测与分析页面"
+            data-flow="响应用户单股查询请求"
+            data-link="进入单股信息"
+        >
+            <span class="node-icon">📊</span>
+            <span class="node-title">服务层：单股分析</span>
+            <span class="node-kind">服务层</span>
+        </a>
+
+        <a
+            class="map-node node-service"
+            style="left: 90.2%; top: 28%;"
+            href="/news"
+            data-title="新闻影响分析服务"
+            data-type="本系统 / 服务层"
+            data-elements="新闻检索|情绪分布统计|影响评估|关键因子解释"
+            data-desc="面向事件驱动研究，聚焦新闻内容对个股的影响路径。"
+            data-input="股票代码 + 新闻过滤条件"
+            data-output="新闻分析结果"
+            data-flow="响应用户新闻分析请求"
+            data-link="进入新闻中心"
+        >
+            <span class="node-icon">📰</span>
+            <span class="node-title">服务层：新闻分析</span>
+            <span class="node-kind">服务层</span>
+        </a>
+
+        <a
+            class="map-node node-service"
+            style="left: 90.2%; top: 47%;"
+            href="/predict"
+            data-title="批量预测服务"
+            data-type="本系统 / 服务层"
+            data-elements="股票池批量推理|概率排序|候选推荐|结果导出"
+            data-desc="面向选股场景，快速输出当期候选股票列表。"
+            data-input="批量预测参数"
+            data-output="批量预测结果页"
+            data-flow="响应用户批量选股请求"
+            data-link="进入批量预测"
+        >
+            <span class="node-icon">🔮</span>
+            <span class="node-title">服务层：批量预测</span>
+            <span class="node-kind">服务层</span>
+        </a>
+
+        <a
+            class="map-node node-service"
+            style="left: 90.2%; top: 68%;"
+            href="/overview"
+            data-title="训练与运维总览"
+            data-type="本系统 / 服务层"
+            data-elements="训练任务触发|训练状态轮询|模型信息展示|系统健康状态展示"
+            data-desc="集中管理训练生命周期与系统状态，是运维与管理入口。"
+            data-input="训练参数配置"
+            data-output="任务状态与模型状态"
+            data-flow="将用户操作反馈给训练与监控链路"
+            data-link="进入总览"
+        >
+            <span class="node-icon">📌</span>
+            <span class="node-title">服务层：总览入口</span>
+            <span class="node-kind">服务层</span>
+        </a>
+
+        <div id="node-tooltip" class="node-tooltip"></div>
     </div>
 </div>
-
-<!-- 多模态模型训练 -->
-<div class="card" style="margin-top: 20px;">
-    <h2>🤖 多模态模型训练</h2>
-    
-    <!-- 当前模型信息 -->
-    <div id="current-model-info" style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
-        <h3 style="margin: 0 0 10px 0; font-size: 16px;">📊 当前模型信息</h3>
-        <div id="model-details" style="color: #666;">加载中...</div>
-    </div>
-    
-    <!-- 模型说明 -->
-    <div style="margin-bottom: 20px; padding: 15px; background: #e7f3ff; border-radius: 8px; border-left: 4px solid #007bff;">
-        <h4 style="margin: 0 0 10px 0;">💡 多模态模型说明</h4>
-        <ul style="margin: 0; padding-left: 20px; color: #333;">
-            <li>融合新闻情感、领域影响、技术指标、相关性矩阵进行预测</li>
-            <li>使用所有股票数据训练全局模型，提供更稳定的预测能力</li>
-            <li>训练时间约5-15分钟，取决于股票数量和训练轮数</li>
-        </ul>
-    </div>
-    
-    <!-- 训练配置 -->
-    <div id="training-config" style="margin-bottom: 20px;">
-        <h3 style="margin: 0 0 15px 0; font-size: 16px;">⚙️ 训练配置</h3>
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
-            <div>
-                <label style="display: block; margin-bottom: 5px; font-weight: 500;">股票数量</label>
-                <input type="number" id="train-stocks" value="50" min="10" max="1000" 
-                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                <small style="color: #888;">建议: 50-200</small>
-            </div>
-            <div>
-                <label style="display: block; margin-bottom: 5px; font-weight: 500;">历史天数</label>
-                <input type="number" id="train-days" value="200" min="100" max="500"
-                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                <small style="color: #888;">建议: 200-300</small>
-            </div>
-            <div>
-                <label style="display: block; margin-bottom: 5px; font-weight: 500;">训练轮数</label>
-                <input type="number" id="train-epochs" value="50" min="10" max="200"
-                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                <small style="color: #888;">建议: 50-100</small>
-            </div>
-        </div>
-    </div>
-    
-    <!-- 训练按钮 -->
-    <button id="train-btn" onclick="startTraining()" 
-            style="width: 100%; padding: 12px; font-size: 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
-        🚀 开始训练
-    </button>
-    
-    <!-- 训练进度 -->
-    <div id="training-progress" style="display: none; margin-top: 20px;">
-        <h3 style="margin: 0 0 10px 0; font-size: 16px;">📈 训练进度</h3>
-        <div style="background: #e9ecef; border-radius: 4px; height: 24px; overflow: hidden; margin-bottom: 10px;">
-            <div id="progress-bar" style="background: #28a745; height: 100%; width: 0%; transition: width 0.3s;"></div>
-        </div>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span id="progress-text" style="color: #666;">准备中...</span>
-            <span id="progress-percent" style="font-weight: 500;">0%</span>
-        </div>
-        <div id="training-log" style="margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 4px; max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px;">
-        </div>
-    </div>
-    
-    <!-- 训练完成提示 -->
-    <div id="training-complete" style="display: none; margin-top: 20px; padding: 15px; background: #d4edda; border-radius: 8px; border-left: 4px solid #28a745;">
-        <strong>✅ 训练完成！</strong>
-        <p style="margin: 10px 0 0 0; color: #155724;">多模态模型已更新，可以使用新模型进行预测。</p>
-    </div>
-    
-    <!-- 训练错误提示 -->
-    <div id="training-error" style="display: none; margin-top: 20px; padding: 15px; background: #f8d7da; border-radius: 8px; border-left: 4px solid #dc3545;">
-        <strong>❌ 训练失败</strong>
-        <p id="error-message" style="margin: 10px 0 0 0; color: #721c24;"></p>
-    </div>
-</div>
-
-<!-- 快速入口 -->
-<div class="card" style="margin-top: 20px;">
-    <h2>🚀 快速入口</h2>
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px;">
-        <a href="/stock" style="text-decoration: none;">
-            <div style="padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; color: white; text-align: center;">
-                <div style="font-size: 32px; margin-bottom: 10px;">📊</div>
-                <div style="font-weight: 500;">单股信息</div>
-                <div style="font-size: 12px; opacity: 0.8;">查询股票详情与预测</div>
-            </div>
-        </a>
-        <a href="/predict" style="text-decoration: none;">
-            <div style="padding: 20px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); border-radius: 8px; color: white; text-align: center;">
-                <div style="font-size: 32px; margin-bottom: 10px;">🔮</div>
-                <div style="font-weight: 500;">批量预测</div>
-                <div style="font-size: 12px; opacity: 0.8;">发现潜力股票</div>
-            </div>
-        </a>
-        <a href="/news" style="text-decoration: none;">
-            <div style="padding: 20px; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); border-radius: 8px; color: white; text-align: center;">
-                <div style="font-size: 32px; margin-bottom: 10px;">📰</div>
-                <div style="font-weight: 500;">新闻中心</div>
-                <div style="font-size: 12px; opacity: 0.8;">新闻与影响分析</div>
-            </div>
-        </a>
-        <a href="/stock" style="text-decoration: none;">
-            <div style="padding: 20px; background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); border-radius: 8px; color: white; text-align: center;">
-                <div style="font-size: 32px; margin-bottom: 10px;">🔗</div>
-                <div style="font-weight: 500;">相关性图谱</div>
-                <div style="font-size: 12px; opacity: 0.8;">股票关联分析</div>
-            </div>
-        </a>
-        <a href="/dataset" style="text-decoration: none;">
-            <div style="padding: 20px; background: linear-gradient(135deg, #ffb347 0%, #ff7b54 100%); border-radius: 8px; color: white; text-align: center;">
-                <div style="font-size: 32px; margin-bottom: 10px;">🧱</div>
-                <div style="font-weight: 500;">数据工坊</div>
-                <div style="font-size: 12px; opacity: 0.8;">构建训练数据集</div>
-            </div>
-        </a>
-    </div>
-</div>
-
-<!-- 刷新状态提示 -->
-<div id="refresh-message" style="display: none; margin-top: 15px; padding: 10px; border-radius: 5px; font-size: 14px;"></div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-let statusInterval = null;
+let starAnimationId = null;
+let flowLabelAdjustTimer = null;
 
-// 页面加载时获取数据
-document.addEventListener('DOMContentLoaded', async function() {
-    await loadStockData();
-    await checkSystemStatus();
-    await loadModelInfo();
-    
-    checkTrainingStatus();
-});
+function buildTooltipHtml(node) {
+    const title = node.dataset.title || '-';
+    const type = node.dataset.type || '-';
+    const desc = node.dataset.desc || '-';
+    const input = node.dataset.input || '-';
+    const output = node.dataset.output || '-';
+    const flow = node.dataset.flow || '-';
+    const link = node.dataset.link || '点击进入模块页面';
+    const elements = (node.dataset.elements || '')
+        .split('|')
+        .map(item => item.trim())
+        .filter(Boolean);
 
-// 页面可见性变化监听
-document.addEventListener('visibilitychange', async function() {
-    if (!document.hidden) {
-        console.log('页面切回可见，检查训练状态...');
-        const wasTrainingVisible = document.getElementById('training-progress').style.display !== 'none';
-        
-        await checkTrainingStatus();
-        
-        try {
-            const response = await fetch('/api/model/train/status');
-            const data = await response.json();
-            
-            if (data.success && data.status.is_training) {
-                document.getElementById('training-progress').style.display = 'block';
-                document.getElementById('training-config').style.opacity = '0.5';
-                document.getElementById('training-config').style.pointerEvents = 'none';
-                
-                const btn = document.getElementById('train-btn');
-                btn.disabled = true;
-                btn.textContent = '⏳ 训练中...';
-                
-                if (!statusInterval) {
-                    pollTrainingStatus();
-                }
-                
-                const messageDiv = document.getElementById('refresh-message');
-                messageDiv.style.display = 'block';
-                messageDiv.style.background = '#fff3cd';
-                messageDiv.style.color = '#856404';
-                messageDiv.textContent = '📊 检测到正在进行模型训练，已恢复进度显示';
-                
-                setTimeout(() => {
-                    messageDiv.style.display = 'none';
-                }, 3000);
-            }
-        } catch (error) {
-            console.error('检查训练状态失败:', error);
-        }
-    }
-});
+    const elementsHtml = elements.length
+        ? `<ul>${elements.map(item => `<li>${item}</li>`).join('')}</ul>`
+        : '<div class="empty">暂无元素说明</div>';
 
-// 加载股票数据
-async function loadStockData() {
-    try {
-        const response = await fetch('/api/stocks');
-        const data = await response.json();
-
-        if (data.success) {
-            document.getElementById('stock-count').textContent = data.data.length + '+';
-        }
-    } catch (error) {
-        console.error('加载股票数据失败:', error);
-        document.getElementById('stock-count').textContent = '✗';
-    }
+    return `
+        <div class="tooltip-title">${title}</div>
+        <div class="tooltip-type">${type}</div>
+        <div class="tooltip-section"><span>模块说明</span><p>${desc}</p></div>
+        <div class="tooltip-section"><span>包含元素</span>${elementsHtml}</div>
+        <div class="tooltip-grid">
+            <div><b>输入</b><p>${input}</p></div>
+            <div><b>输出</b><p>${output}</p></div>
+        </div>
+        <div class="tooltip-section"><span>数据流作用</span><p>${flow}</p></div>
+        <div class="tooltip-link-hint">${link}</div>
+    `;
 }
 
-// 检查系统状态
-async function checkSystemStatus() {
-    try {
-        const healthResponse = await fetch('/api/health');
-        const healthData = await healthResponse.json();
-
-        if (healthData.status === 'ok') {
-            document.getElementById('system-status').textContent = '✓ 运行中';
-            document.getElementById('system-status').style.color = '#28a745';
-            
-            if (healthData.model && healthData.model.available) {
-                document.getElementById('model-status').textContent = '✓ 已加载';
-                document.getElementById('model-status').style.color = '#28a745';
-                document.getElementById('model-status-card').classList.add('positive');
-            } else {
-                document.getElementById('model-status').textContent = '未训练';
-                document.getElementById('model-status').style.color = '#dc3545';
-            }
-        } else {
-            document.getElementById('system-status').textContent = '✗ 异常';
-            document.getElementById('system-status').style.color = '#dc3545';
-        }
-    } catch (error) {
-        console.error('检查系统状态失败:', error);
-        document.getElementById('system-status').textContent = '✗ 无法连接';
-        document.getElementById('system-status').style.color = '#dc3545';
+function setupMapInteractions() {
+    const nodes = Array.from(document.querySelectorAll('.map-node'));
+    const tooltip = document.getElementById('node-tooltip');
+    const map = document.getElementById('system-map');
+    if (!nodes.length || !tooltip || !map) {
+        return;
     }
-}
 
-// 加载模型信息
-async function loadModelInfo() {
-    try {
-        const response = await fetch('/api/model/info');
-        const data = await response.json();
-        
-        const detailsDiv = document.getElementById('model-details');
-        
-        if (data.model_available && data.model) {
-            const model = data.model;
-            const metrics = model.final_metrics || {};
-            
-            detailsDiv.innerHTML = `
-                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
-                    <div>
-                        <div style="font-size: 12px; color: #888;">模型类型</div>
-                        <div style="font-weight: 500;">多模态预测模型</div>
-                    </div>
-                    <div>
-                        <div style="font-size: 12px; color: #888;">创建时间</div>
-                        <div style="font-weight: 500;">${model.created_at ? model.created_at.split('T')[0] : '未知'}</div>
-                    </div>
-                    <div>
-                        <div style="font-size: 12px; color: #888;">训练样本</div>
-                        <div style="font-weight: 500;">${model.training_samples || '未知'}</div>
-                    </div>
-                </div>
-                ${metrics.accuracy ? `
-                    <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee;">
-                        <span style="color: #888; font-size: 12px;">验证准确率: </span>
-                        <span style="font-weight: 500; color: #28a745;">${(metrics.val_accuracy * 100).toFixed(1)}%</span>
-                    </div>
-                ` : ''}
-            `;
-        } else {
-            detailsDiv.innerHTML = `
-                <div style="color: #856404;">
-                    <p style="margin: 0;">⚠️ 尚未训练模型，请配置参数后点击"开始训练"</p>
-                </div>
-            `;
-        }
-    } catch (error) {
-        console.error('加载模型信息失败:', error);
-        document.getElementById('model-details').innerHTML = '<span style="color: #dc3545;">加载失败</span>';
-    }
-}
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-// 刷新股票列表
-async function refreshStockList() {
-    const btn = document.getElementById('refresh-stocks-btn');
-    const originalText = btn.textContent;
-    btn.textContent = '⏳ 刷新中...';
-    btn.disabled = true;
-    
-    try {
-        const response = await fetch('/api/stocks?refresh=true');
-        const data = await response.json();
-        
-        if (data.success) {
-            document.getElementById('stock-count').textContent = data.data.length + '+';
-            
-            const messageDiv = document.getElementById('refresh-message');
-            messageDiv.style.display = 'block';
-            messageDiv.style.background = '#d4edda';
-            messageDiv.style.color = '#155724';
-            messageDiv.textContent = '✓ 股票列表已刷新';
-            
-            setTimeout(() => {
-                messageDiv.style.display = 'none';
-            }, 3000);
-        }
-    } catch (error) {
-        console.error('刷新股票列表失败:', error);
-    } finally {
-        btn.textContent = originalText;
-        btn.disabled = false;
-    }
-}
-
-// 开始训练
-async function startTraining() {
-    const btn = document.getElementById('train-btn');
-    const stocks = document.getElementById('train-stocks').value;
-    const days = document.getElementById('train-days').value;
-    const epochs = document.getElementById('train-epochs').value;
-    
-    btn.disabled = true;
-    btn.textContent = '⏳ 启动中...';
-    
-    document.getElementById('training-progress').style.display = 'block';
-    document.getElementById('training-config').style.opacity = '0.5';
-    document.getElementById('training-config').style.pointerEvents = 'none';
-    document.getElementById('training-complete').style.display = 'none';
-    document.getElementById('training-error').style.display = 'none';
-    
-    try {
-        const response = await fetch('/api/model/train', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                stocks: parseInt(stocks),
-                days: parseInt(days),
-                epochs: parseInt(epochs)
-            })
+    nodes.forEach(node => {
+        node.addEventListener('mouseenter', event => {
+            tooltip.innerHTML = buildTooltipHtml(node);
+            tooltip.classList.add('show');
+            positionTooltip(event.clientX, event.clientY, tooltip);
+            nodes.forEach(item => item.classList.remove('active'));
+            node.classList.add('active');
         });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            pollTrainingStatus();
-        } else {
-            throw new Error(data.message);
-        }
-    } catch (error) {
-        console.error('启动训练失败:', error);
-        btn.disabled = false;
-        btn.textContent = '🚀 开始训练';
-        document.getElementById('training-progress').style.display = 'none';
-        document.getElementById('training-config').style.opacity = '1';
-        document.getElementById('training-config').style.pointerEvents = 'auto';
-        
-        document.getElementById('training-error').style.display = 'block';
-        document.getElementById('error-message').textContent = error.message;
+
+        node.addEventListener('mousemove', event => {
+            positionTooltip(event.clientX, event.clientY, tooltip);
+        });
+
+        node.addEventListener('mouseleave', () => {
+            tooltip.classList.remove('show');
+            node.classList.remove('active');
+        });
+
+        node.addEventListener('focus', () => {
+            tooltip.innerHTML = buildTooltipHtml(node);
+            tooltip.classList.add('show');
+            const rect = node.getBoundingClientRect();
+            positionTooltip(rect.right + 12, rect.top + 12, tooltip);
+            nodes.forEach(item => item.classList.remove('active'));
+            node.classList.add('active');
+        });
+
+        node.addEventListener('blur', () => {
+            tooltip.classList.remove('show');
+            node.classList.remove('active');
+        });
+    });
+
+    if (prefersReducedMotion) {
+        const pulseLinks = document.querySelectorAll('.map-link.pulse');
+        pulseLinks.forEach(link => {
+            link.style.animation = 'none';
+        });
     }
 }
 
-// 轮询训练状态
-function pollTrainingStatus() {
-    if (statusInterval) {
-        clearInterval(statusInterval);
+function hasRectCollision(targetRect, rectList, gap = 4) {
+    return rectList.some(rect =>
+        !(targetRect.right + gap <= rect.left ||
+          targetRect.left >= rect.right + gap ||
+          targetRect.bottom + gap <= rect.top ||
+          targetRect.top >= rect.bottom + gap)
+    );
+}
+
+function adjustFlowLabels() {
+    const map = document.getElementById('system-map');
+    if (!map) {
+        return;
     }
-    
-    statusInterval = setInterval(async () => {
-        try {
-            const response = await fetch('/api/model/train/status');
-            const data = await response.json();
-            
-            if (data.success) {
-                updateTrainingProgress(data.status);
-                
-                if (!data.status.is_training) {
-                    clearInterval(statusInterval);
-                    statusInterval = null;
-                }
+
+    const labels = Array.from(map.querySelectorAll('.flow-label'));
+    const nodes = Array.from(map.querySelectorAll('.map-node'));
+    if (!labels.length || !nodes.length) {
+        return;
+    }
+
+    labels.forEach(label => {
+        if (!label.dataset.baseLeft) {
+            label.dataset.baseLeft = label.style.left || '0%';
+            label.dataset.baseTop = label.style.top || '0%';
+        }
+        label.style.left = label.dataset.baseLeft;
+        label.style.top = label.dataset.baseTop;
+    });
+
+    const mapRect = map.getBoundingClientRect();
+    const nodeRects = nodes.map(node => node.getBoundingClientRect());
+    const placedLabelRects = [];
+    const offsetCandidates = [
+        [0, 0],
+        [0, -30], [0, 30],
+        [0, -56], [0, 56],
+        [-36, 0], [36, 0],
+        [-54, -24], [54, -24],
+        [-54, 24], [54, 24],
+        [0, -84], [0, 84]
+    ];
+
+    labels.forEach(label => {
+        const baseRect = label.getBoundingClientRect();
+        const baseLeft = baseRect.left - mapRect.left;
+        const baseTop = baseRect.top - mapRect.top;
+        let placed = false;
+
+        for (const [dx, dy] of offsetCandidates) {
+            const nextLeft = baseLeft + dx;
+            const nextTop = baseTop + dy;
+
+            label.style.left = `${(nextLeft / mapRect.width) * 100}%`;
+            label.style.top = `${(nextTop / mapRect.height) * 100}%`;
+            const rect = label.getBoundingClientRect();
+
+            const outOfBounds =
+                rect.left < mapRect.left + 6 ||
+                rect.right > mapRect.right - 6 ||
+                rect.top < mapRect.top + 6 ||
+                rect.bottom > mapRect.bottom - 6;
+
+            if (outOfBounds) {
+                continue;
             }
-        } catch (error) {
-            console.error('获取训练状态失败:', error);
+
+            if (hasRectCollision(rect, nodeRects, 4) || hasRectCollision(rect, placedLabelRects, 6)) {
+                continue;
+            }
+
+            placedLabelRects.push(rect);
+            placed = true;
+            break;
         }
-    }, 2000);
+
+        if (!placed) {
+            label.style.left = label.dataset.baseLeft;
+            label.style.top = label.dataset.baseTop;
+            placedLabelRects.push(label.getBoundingClientRect());
+        }
+    });
 }
 
-// 更新训练进度
-function updateTrainingProgress(status) {
-    const progressBar = document.getElementById('progress-bar');
-    const progressText = document.getElementById('progress-text');
-    const progressPercent = document.getElementById('progress-percent');
-    const btn = document.getElementById('train-btn');
-    
-    progressBar.style.width = status.progress + '%';
-    progressPercent.textContent = status.progress + '%';
-    progressText.textContent = status.message;
-    
-    if (status.error) {
-        btn.disabled = false;
-        btn.textContent = '🚀 开始训练';
-        document.getElementById('training-config').style.opacity = '1';
-        document.getElementById('training-config').style.pointerEvents = 'auto';
-        
-        document.getElementById('training-error').style.display = 'block';
-        document.getElementById('error-message').textContent = status.error;
-    } else if (status.progress === 100) {
-        btn.disabled = false;
-        btn.textContent = '🚀 开始训练';
-        document.getElementById('training-config').style.opacity = '1';
-        document.getElementById('training-config').style.pointerEvents = 'auto';
-        
-        document.getElementById('training-complete').style.display = 'block';
-        loadModelInfo();
-    } else {
-        btn.textContent = '⏳ 训练中...';
+function scheduleFlowLabelAdjust() {
+    if (flowLabelAdjustTimer) {
+        clearTimeout(flowLabelAdjustTimer);
     }
+    flowLabelAdjustTimer = setTimeout(() => {
+        adjustFlowLabels();
+    }, 90);
 }
 
-// 检查训练状态
-async function checkTrainingStatus() {
-    try {
-        const response = await fetch('/api/model/train/status');
-        const data = await response.json();
-        
-        if (data.success && data.status.is_training) {
-            document.getElementById('training-progress').style.display = 'block';
-            document.getElementById('training-config').style.opacity = '0.5';
-            document.getElementById('training-config').style.pointerEvents = 'none';
-            
-            const btn = document.getElementById('train-btn');
-            btn.disabled = true;
-            btn.textContent = '⏳ 训练中...';
-            
-            updateTrainingProgress(data.status);
-            pollTrainingStatus();
-        }
-    } catch (error) {
-        console.error('检查训练状态失败:', error);
+function positionTooltip(clientX, clientY, tooltip) {
+    const margin = 16;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const tooltipRect = tooltip.getBoundingClientRect();
+
+    let left = clientX + 18;
+    let top = clientY + 16;
+
+    if (left + tooltipRect.width > viewportWidth - margin) {
+        left = clientX - tooltipRect.width - 18;
     }
+    if (left < margin) {
+        left = margin;
+    }
+
+    if (top + tooltipRect.height > viewportHeight - margin) {
+        top = viewportHeight - tooltipRect.height - margin;
+    }
+    if (top < margin) {
+        top = margin;
+    }
+
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
 }
+
+function initStarfield() {
+    const canvas = document.getElementById('starfield-canvas');
+    const container = document.getElementById('galaxy-home');
+    if (!canvas || !container) {
+        return;
+    }
+
+    const context = canvas.getContext('2d');
+    if (!context) {
+        return;
+    }
+
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReducedMotion) {
+        return;
+    }
+
+    const stars = [];
+    const starCount = 220;
+
+    function resize() {
+        const ratio = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+        canvas.width = Math.floor(window.innerWidth * ratio);
+        canvas.height = Math.floor(window.innerHeight * ratio);
+        canvas.style.width = `${window.innerWidth}px`;
+        canvas.style.height = `${window.innerHeight}px`;
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    }
+
+    function createStar() {
+        return {
+            x: Math.random() * window.innerWidth,
+            y: Math.random() * window.innerHeight,
+            r: Math.random() * 1.8 + 0.2,
+            speed: Math.random() * 0.35 + 0.05,
+            twinkle: Math.random() * 0.6 + 0.2,
+            drift: (Math.random() - 0.5) * 0.08
+        };
+    }
+
+    while (stars.length < starCount) {
+        stars.push(createStar());
+    }
+
+    function draw() {
+        context.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+        for (const star of stars) {
+            star.y += star.speed;
+            star.x += star.drift;
+            star.twinkle += (Math.random() - 0.5) * 0.04;
+            star.twinkle = Math.max(0.15, Math.min(0.9, star.twinkle));
+
+            if (star.y > window.innerHeight + 4) {
+                star.y = -4;
+                star.x = Math.random() * window.innerWidth;
+            }
+            if (star.x < -4) {
+                star.x = window.innerWidth + 4;
+            }
+            if (star.x > window.innerWidth + 4) {
+                star.x = -4;
+            }
+
+            context.beginPath();
+            context.arc(star.x, star.y, star.r, 0, Math.PI * 2);
+            context.fillStyle = `rgba(226, 232, 240, ${star.twinkle})`;
+            context.fill();
+        }
+
+        starAnimationId = requestAnimationFrame(draw);
+    }
+
+    resize();
+    draw();
+
+    window.addEventListener('resize', resize);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    setupMapInteractions();
+    initStarfield();
+    scheduleFlowLabelAdjust();
+    setTimeout(scheduleFlowLabelAdjust, 260);
+    setTimeout(scheduleFlowLabelAdjust, 620);
+});
+
+window.addEventListener('beforeunload', function() {
+    if (starAnimationId) {
+        cancelAnimationFrame(starAnimationId);
+        starAnimationId = null;
+    }
+    if (flowLabelAdjustTimer) {
+        clearTimeout(flowLabelAdjustTimer);
+        flowLabelAdjustTimer = null;
+    }
+});
+
+window.addEventListener('resize', scheduleFlowLabelAdjust);
 </script>
 {% endblock %}

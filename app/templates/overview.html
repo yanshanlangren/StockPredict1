@@ -1,0 +1,455 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- 系统总览 -->
+<div class="card">
+    <h2>🎯 系统总览</h2>
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="label">数据源状态</div>
+            <div class="value">✓ 正常</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">
+                可用股票
+                <button
+                    id="refresh-stocks-btn"
+                    onclick="refreshStockList()"
+                    style="margin-left: 10px; padding: 5px 12px; font-size: 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;"
+                    title="刷新股票列表">
+                    🔄 刷新
+                </button>
+            </div>
+            <div class="value" id="stock-count">-</div>
+        </div>
+        <div class="stat-card" id="model-status-card">
+            <div class="label">多模态模型状态</div>
+            <div class="value" id="model-status">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">系统状态</div>
+            <div class="value" id="system-status">-</div>
+        </div>
+    </div>
+</div>
+
+<!-- 多模态模型训练 -->
+<div class="card" style="margin-top: 20px;">
+    <h2>🤖 多模态模型训练</h2>
+    
+    <!-- 当前模型信息 -->
+    <div id="current-model-info" style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+        <h3 style="margin: 0 0 10px 0; font-size: 16px;">📊 当前模型信息</h3>
+        <div id="model-details" style="color: #666;">加载中...</div>
+    </div>
+    
+    <!-- 模型说明 -->
+    <div style="margin-bottom: 20px; padding: 15px; background: #e7f3ff; border-radius: 8px; border-left: 4px solid #007bff;">
+        <h4 style="margin: 0 0 10px 0;">💡 多模态模型说明</h4>
+        <ul style="margin: 0; padding-left: 20px; color: #333;">
+            <li>融合新闻情感、领域影响、技术指标、相关性矩阵进行预测</li>
+            <li>Phase 4: 引入文本向量分支，支持更重的融合模型</li>
+            <li>训练前需先在“模型训练”页面完成 model_dataset / market_daily / news_raw 构建</li>
+            <li>使用所有股票数据训练全局模型，提供更稳定的预测能力</li>
+            <li>训练时间约5-15分钟，取决于股票数量和训练轮数</li>
+        </ul>
+    </div>
+    
+    <!-- 训练配置 -->
+    <div id="training-config" style="margin-bottom: 20px;">
+        <h3 style="margin: 0 0 15px 0; font-size: 16px;">⚙️ 训练配置</h3>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 15px;">
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">股票数量</label>
+                <input type="number" id="train-stocks" value="50" min="10" max="1000" 
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <small style="color: #888;">建议: 50-200</small>
+            </div>
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">历史天数</label>
+                <input type="number" id="train-days" value="200" min="100" max="500"
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <small style="color: #888;">建议: 200-300</small>
+            </div>
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">训练轮数</label>
+                <input type="number" id="train-epochs" value="50" min="10" max="200"
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <small style="color: #888;">建议: 50-100</small>
+            </div>
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">模型模式</label>
+                <input type="text" value="heavy（固定）" disabled
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background: #f8fafc;">
+                <small style="color: #888;">固定使用 heavy，多模态文本向量增强已启用</small>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 训练按钮 -->
+    <button id="train-btn" onclick="startTraining()" 
+            style="width: 100%; padding: 12px; font-size: 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+        🚀 开始训练
+    </button>
+    
+    <!-- 训练进度 -->
+    <div id="training-progress" style="display: none; margin-top: 20px;">
+        <h3 style="margin: 0 0 10px 0; font-size: 16px;">📈 训练进度</h3>
+        <div style="background: #e9ecef; border-radius: 4px; height: 24px; overflow: hidden; margin-bottom: 10px;">
+            <div id="progress-bar" style="background: #28a745; height: 100%; width: 0%; transition: width 0.3s;"></div>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span id="progress-text" style="color: #666;">准备中...</span>
+            <span id="progress-percent" style="font-weight: 500;">0%</span>
+        </div>
+        <div id="training-log" style="margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 4px; max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px;">
+        </div>
+    </div>
+    
+    <!-- 训练完成提示 -->
+    <div id="training-complete" style="display: none; margin-top: 20px; padding: 15px; background: #d4edda; border-radius: 8px; border-left: 4px solid #28a745;">
+        <strong>✅ 训练完成！</strong>
+        <p style="margin: 10px 0 0 0; color: #155724;">多模态模型已更新，可以使用新模型进行预测。</p>
+    </div>
+    
+    <!-- 训练错误提示 -->
+    <div id="training-error" style="display: none; margin-top: 20px; padding: 15px; background: #f8d7da; border-radius: 8px; border-left: 4px solid #dc3545;">
+        <strong>❌ 训练失败</strong>
+        <p id="error-message" style="margin: 10px 0 0 0; color: #721c24;"></p>
+    </div>
+</div>
+
+<!-- 刷新状态提示 -->
+<div id="refresh-message" style="display: none; margin-top: 15px; padding: 10px; border-radius: 5px; font-size: 14px;"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let statusInterval = null;
+
+// 页面加载时获取数据
+document.addEventListener('DOMContentLoaded', async function() {
+    await loadStockData();
+    await checkSystemStatus();
+    await loadModelInfo();
+    
+    checkTrainingStatus();
+});
+
+// 页面可见性变化监听
+document.addEventListener('visibilitychange', async function() {
+    if (!document.hidden) {
+        console.log('页面切回可见，检查训练状态...');
+        const wasTrainingVisible = document.getElementById('training-progress').style.display !== 'none';
+        
+        await checkTrainingStatus();
+        
+        try {
+            const response = await fetch('/api/model/train/status');
+            const data = await response.json();
+            
+            if (data.success && data.status.is_training) {
+                document.getElementById('training-progress').style.display = 'block';
+                document.getElementById('training-config').style.opacity = '0.5';
+                document.getElementById('training-config').style.pointerEvents = 'none';
+                
+                const btn = document.getElementById('train-btn');
+                btn.disabled = true;
+                btn.textContent = '⏳ 训练中...';
+                
+                if (!statusInterval) {
+                    pollTrainingStatus();
+                }
+                
+                const messageDiv = document.getElementById('refresh-message');
+                messageDiv.style.display = 'block';
+                messageDiv.style.background = '#fff3cd';
+                messageDiv.style.color = '#856404';
+                messageDiv.textContent = '📊 检测到正在进行模型训练，已恢复进度显示';
+                
+                setTimeout(() => {
+                    messageDiv.style.display = 'none';
+                }, 3000);
+            }
+        } catch (error) {
+            console.error('检查训练状态失败:', error);
+        }
+    }
+});
+
+// 加载股票数据
+async function loadStockData() {
+    try {
+        const response = await fetch('/api/stocks');
+        const data = await response.json();
+
+        if (data.success) {
+            document.getElementById('stock-count').textContent = data.data.length + '+';
+        }
+    } catch (error) {
+        console.error('加载股票数据失败:', error);
+        document.getElementById('stock-count').textContent = '✗';
+    }
+}
+
+// 检查系统状态
+async function checkSystemStatus() {
+    try {
+        const healthResponse = await fetch('/api/health');
+        const healthData = await healthResponse.json();
+
+        if (healthData.status === 'ok') {
+            document.getElementById('system-status').textContent = '✓ 运行中';
+            document.getElementById('system-status').style.color = '#28a745';
+            
+            if (healthData.model && healthData.model.available) {
+                document.getElementById('model-status').textContent = '✓ 已加载';
+                document.getElementById('model-status').style.color = '#28a745';
+                document.getElementById('model-status-card').classList.add('positive');
+            } else {
+                document.getElementById('model-status').textContent = '未训练';
+                document.getElementById('model-status').style.color = '#dc3545';
+            }
+        } else {
+            document.getElementById('system-status').textContent = '✗ 异常';
+            document.getElementById('system-status').style.color = '#dc3545';
+        }
+    } catch (error) {
+        console.error('检查系统状态失败:', error);
+        document.getElementById('system-status').textContent = '✗ 无法连接';
+        document.getElementById('system-status').style.color = '#dc3545';
+    }
+}
+
+// 加载模型信息
+async function loadModelInfo() {
+    try {
+        const response = await fetch('/api/model/info');
+        const data = await response.json();
+        
+        const detailsDiv = document.getElementById('model-details');
+        
+        if (data.model) {
+            const model = data.model;
+            const metrics = model.final_metrics || {};
+            const featureDims = model.feature_dims || {};
+            
+            detailsDiv.innerHTML = `
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px;">
+                    <div>
+                        <div style="font-size: 12px; color: #888;">模型类型</div>
+                        <div style="font-weight: 500;">多模态预测模型</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #888;">运行后端</div>
+                        <div style="font-weight: 500;">${model.runtime_backend || model.backend || '未知'}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #888;">模型模式</div>
+                        <div style="font-weight: 500;">${model.model_tier || 'heavy'}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #888;">创建时间</div>
+                        <div style="font-weight: 500;">${model.created_at ? model.created_at.split('T')[0] : '未知'}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #888;">训练样本</div>
+                        <div style="font-weight: 500;">${model.training_samples || '未知'}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #888;">文本向量维度</div>
+                        <div style="font-weight: 500;">${featureDims.text || 0}</div>
+                    </div>
+                </div>
+                ${(metrics.val_accuracy || metrics.val_auc) ? `
+                    <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee;">
+                        <span style="color: #888; font-size: 12px;">验证准确率: </span>
+                        <span style="font-weight: 500; color: #28a745;">${metrics.val_accuracy ? (metrics.val_accuracy * 100).toFixed(1) + '%' : '暂无'}</span>
+                        <span style="margin-left: 16px; color: #888; font-size: 12px;">验证AUC: </span>
+                        <span style="font-weight: 500; color: #007bff;">${metrics.val_auc ? metrics.val_auc.toFixed(4) : '暂无'}</span>
+                    </div>
+                ` : ''}
+                ${model.baseline_comparison && model.baseline_comparison.message ? `
+                    <div style="margin-top: 8px; color: #555; font-size: 12px;">
+                        基线对比: ${model.baseline_comparison.message}
+                    </div>
+                ` : ''}
+                ${model.candidate_only ? `
+                    <div style="margin-top: 8px; padding: 8px 10px; background: #fff3cd; border-left: 3px solid #ffc107; color: #856404; font-size: 12px;">
+                        当前训练结果未超过基线，已保存为候选模型，未替换线上模型。
+                    </div>
+                ` : ''}
+            `;
+        } else {
+            detailsDiv.innerHTML = `
+                <div style="color: #856404;">
+                    <p style="margin: 0;">⚠️ 尚未训练模型，请配置参数后点击"开始训练"</p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('加载模型信息失败:', error);
+        document.getElementById('model-details').innerHTML = '<span style="color: #dc3545;">加载失败</span>';
+    }
+}
+
+// 刷新股票列表
+async function refreshStockList() {
+    const btn = document.getElementById('refresh-stocks-btn');
+    const originalText = btn.textContent;
+    btn.textContent = '⏳ 刷新中...';
+    btn.disabled = true;
+    
+    try {
+        const response = await fetch('/api/stocks?refresh=true');
+        const data = await response.json();
+        
+        if (data.success) {
+            document.getElementById('stock-count').textContent = data.data.length + '+';
+            
+            const messageDiv = document.getElementById('refresh-message');
+            messageDiv.style.display = 'block';
+            messageDiv.style.background = '#d4edda';
+            messageDiv.style.color = '#155724';
+            messageDiv.textContent = '✓ 股票列表已刷新';
+            
+            setTimeout(() => {
+                messageDiv.style.display = 'none';
+            }, 3000);
+        }
+    } catch (error) {
+        console.error('刷新股票列表失败:', error);
+    } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
+}
+
+// 开始训练
+async function startTraining() {
+    const btn = document.getElementById('train-btn');
+    const stocks = document.getElementById('train-stocks').value;
+    const days = document.getElementById('train-days').value;
+    const epochs = document.getElementById('train-epochs').value;
+    
+    btn.disabled = true;
+    btn.textContent = '⏳ 启动中...';
+    
+    document.getElementById('training-progress').style.display = 'block';
+    document.getElementById('training-config').style.opacity = '0.5';
+    document.getElementById('training-config').style.pointerEvents = 'none';
+    document.getElementById('training-complete').style.display = 'none';
+    document.getElementById('training-error').style.display = 'none';
+    
+    try {
+        const response = await fetch('/api/model/train', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                stocks: parseInt(stocks),
+                days: parseInt(days),
+                epochs: parseInt(epochs)
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            pollTrainingStatus();
+        } else {
+            throw new Error(data.message);
+        }
+    } catch (error) {
+        console.error('启动训练失败:', error);
+        btn.disabled = false;
+        btn.textContent = '🚀 开始训练';
+        document.getElementById('training-progress').style.display = 'none';
+        document.getElementById('training-config').style.opacity = '1';
+        document.getElementById('training-config').style.pointerEvents = 'auto';
+        
+        document.getElementById('training-error').style.display = 'block';
+        document.getElementById('error-message').textContent = error.message;
+    }
+}
+
+// 轮询训练状态
+function pollTrainingStatus() {
+    if (statusInterval) {
+        clearInterval(statusInterval);
+    }
+    
+    statusInterval = setInterval(async () => {
+        try {
+            const response = await fetch('/api/model/train/status');
+            const data = await response.json();
+            
+            if (data.success) {
+                updateTrainingProgress(data.status);
+                
+                if (!data.status.is_training) {
+                    clearInterval(statusInterval);
+                    statusInterval = null;
+                }
+            }
+        } catch (error) {
+            console.error('获取训练状态失败:', error);
+        }
+    }, 2000);
+}
+
+// 更新训练进度
+function updateTrainingProgress(status) {
+    const progressBar = document.getElementById('progress-bar');
+    const progressText = document.getElementById('progress-text');
+    const progressPercent = document.getElementById('progress-percent');
+    const btn = document.getElementById('train-btn');
+    
+    progressBar.style.width = status.progress + '%';
+    progressPercent.textContent = status.progress + '%';
+    progressText.textContent = status.message;
+    
+    if (status.error) {
+        btn.disabled = false;
+        btn.textContent = '🚀 开始训练';
+        document.getElementById('training-config').style.opacity = '1';
+        document.getElementById('training-config').style.pointerEvents = 'auto';
+        
+        document.getElementById('training-error').style.display = 'block';
+        document.getElementById('error-message').textContent = status.error;
+    } else if (status.progress === 100) {
+        btn.disabled = false;
+        btn.textContent = '🚀 开始训练';
+        document.getElementById('training-config').style.opacity = '1';
+        document.getElementById('training-config').style.pointerEvents = 'auto';
+        
+        document.getElementById('training-complete').style.display = 'block';
+        loadModelInfo();
+    } else {
+        btn.textContent = '⏳ 训练中...';
+    }
+}
+
+// 检查训练状态
+async function checkTrainingStatus() {
+    try {
+        const response = await fetch('/api/model/train/status');
+        const data = await response.json();
+        
+        if (data.success && data.status.is_training) {
+            document.getElementById('training-progress').style.display = 'block';
+            document.getElementById('training-config').style.opacity = '0.5';
+            document.getElementById('training-config').style.pointerEvents = 'none';
+            
+            const btn = document.getElementById('train-btn');
+            btn.disabled = true;
+            btn.textContent = '⏳ 训练中...';
+            
+            updateTrainingProgress(data.status);
+            pollTrainingStatus();
+        }
+    } catch (error) {
+        console.error('检查训练状态失败:', error);
+    }
+}
+</script>
+{% endblock %}

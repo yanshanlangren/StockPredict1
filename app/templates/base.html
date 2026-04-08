@@ -7,29 +7,34 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
-<body>
-    <div class="container">
+<body class="{% if request.endpoint == 'index' %}home-graph-body{% endif %}">
+    <div class="container {% if request.endpoint == 'index' %}home-graph-container{% endif %}">
+        {% if request.endpoint != 'index' %}
         <!-- 顶部导航 -->
         <header class="header">
             <h1>📈 股票交易AI系统</h1>
             <nav class="nav">
-                <a href="{{ url_for('index') }}" class="nav-link {% if request.endpoint == 'index' %}active{% endif %}">首页</a>
+                <a href="{{ url_for('index') }}" class="nav-link {% if request.endpoint == 'index' %}active{% endif %}">🏠 首页</a>
+                <a href="{{ url_for('overview_page') }}" class="nav-link {% if request.endpoint == 'overview_page' %}active{% endif %}">📌 总览</a>
+                <a href="{{ url_for('dataset_page') }}" class="nav-link {% if request.endpoint == 'dataset_page' %}active{% endif %}">🧠 模型训练</a>
                 <a href="{{ url_for('stock_page') }}" class="nav-link {% if request.endpoint == 'stock_page' %}active{% endif %}">📊 单股信息</a>
                 <a href="{{ url_for('predict_page') }}" class="nav-link {% if request.endpoint == 'predict_page' %}active{% endif %}">🔮 批量预测</a>
                 <a href="{{ url_for('news_page') }}" class="nav-link {% if request.endpoint == 'news_page' %}active{% endif %}">📰 新闻中心</a>
-                <a href="{{ url_for('dataset_page') }}" class="nav-link {% if request.endpoint == 'dataset_page' %}active{% endif %}">🧱 数据工坊</a>
             </nav>
         </header>
+        {% endif %}
 
         <!-- 主要内容 -->
-        <main class="main">
+        <main class="main {% if request.endpoint == 'index' %}home-graph-main{% endif %}">
             {% block content %}{% endblock %}
         </main>
 
+        {% if request.endpoint != 'index' %}
         <!-- 页脚 -->
         <footer class="footer">
             <p>© 2026 股票交易AI系统 | 基于多模态预测模型 | 使用腾讯财经数据</p>
         </footer>
+        {% endif %}
     </div>
 
     <!-- 加载JavaScript -->
