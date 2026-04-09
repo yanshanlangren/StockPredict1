@@ -16,10 +16,10 @@
             <nav class="nav">
                 <a href="{{ url_for('index') }}" class="nav-link {% if request.endpoint == 'index' %}active{% endif %}">🏠 首页</a>
                 <a href="{{ url_for('overview_page') }}" class="nav-link {% if request.endpoint == 'overview_page' %}active{% endif %}">📌 总览</a>
+                <a href="{{ url_for('news_page') }}" class="nav-link {% if request.endpoint == 'news_page' %}active{% endif %}">📰 新闻中心</a>
                 <a href="{{ url_for('dataset_page') }}" class="nav-link {% if request.endpoint == 'dataset_page' %}active{% endif %}">🧠 模型训练</a>
                 <a href="{{ url_for('stock_page') }}" class="nav-link {% if request.endpoint == 'stock_page' %}active{% endif %}">📊 单股信息</a>
-                <a href="{{ url_for('predict_page') }}" class="nav-link {% if request.endpoint == 'predict_page' %}active{% endif %}">🔮 批量预测</a>
-                <a href="{{ url_for('news_page') }}" class="nav-link {% if request.endpoint == 'news_page' %}active{% endif %}">📰 新闻中心</a>
+                <a href="{{ url_for('predict_page') }}" class="nav-link {% if request.endpoint == 'predict_page' %}active{% endif %}">⭐ 股票推荐</a>
             </nav>
         </header>
         {% endif %}

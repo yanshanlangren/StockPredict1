@@ -59,10 +59,11 @@
 </div>
 
 <div class="card">
-    <h2>🤖 多模态模型训练</h2>
+    <h2>🚀 一体化模型训练（离线数据集 + 多模态模型）</h2>
     <div class="dataset-note" style="margin-bottom: 12px;">
-        训练前会检查 <code>model_dataset</code> / <code>market_daily</code> / <code>news_raw</code> 是否已构建，
-        并展示“新闻情感、领域影响、技术指标、相关性矩阵”四类特征状态。训练模式固定为 <code>heavy</code>（TensorFlow）。
+        将“构建离线数据集”和“多模态模型训练”合并为一个流程，统一使用相同的股票数量与历史天数参数。
+        启动后会先构建 <code>model_dataset</code> / <code>market_daily</code> / <code>news_raw</code>，
+        再自动进入多模态模型训练。
     </div>
 
     <div id="mm-current-model-info" style="margin-bottom: 16px; padding: 12px; background: #f8fafc; border-radius: 8px;">
@@ -87,36 +88,51 @@
 
     <div class="dataset-form-grid">
         <div class="form-group">
-            <label for="mm-train-stocks">股票数量</label>
-            <input type="number" id="mm-train-stocks" min="10" max="1000" value="80">
+            <label for="joint-stocks">股票数量（构建+训练共用）</label>
+            <input type="number" id="joint-stocks" min="10" max="2000" value="80">
         </div>
         <div class="form-group">
-            <label for="mm-train-days">历史天数</label>
-            <input type="number" id="mm-train-days" min="100" max="800" value="240">
+            <label for="joint-days">历史天数（构建+训练共用）</label>
+            <input type="number" id="joint-days" min="100" max="1200" value="240">
         </div>
         <div class="form-group">
-            <label for="mm-train-epochs">训练轮数</label>
-            <input type="number" id="mm-train-epochs" min="10" max="300" value="60">
+            <label for="joint-epochs">训练轮数</label>
+            <input type="number" id="joint-epochs" min="10" max="300" value="60">
         </div>
         <div class="form-group">
-            <label>模型模式</label>
-            <input type="text" value="heavy（固定）" disabled>
+            <label for="joint-horizon">预测窗口</label>
+            <input type="number" id="joint-horizon" min="1" max="20" value="5">
         </div>
+        <div class="form-group">
+            <label for="joint-threshold">标签阈值</label>
+            <input type="number" id="joint-threshold" min="0" max="0.2" step="0.005" value="0.01">
+        </div>
+    </div>
+
+    <div class="dataset-toggle-row" style="margin-top: 10px;">
+        <label class="dataset-check">
+            <input type="checkbox" id="joint-force-refresh">
+            <span>强制刷新行情缓存</span>
+        </label>
+        <label class="dataset-check">
+            <input type="checkbox" id="joint-refresh-news">
+            <span>缓存缺失时抓取新闻</span>
+        </label>
     </div>
 
     <div class="dataset-action-row">
         <button id="mm-train-btn" class="btn btn-success" onclick="startMultimodalTrain()">
-            开始多模态模型训练
+            开始一体化训练
         </button>
         <button id="mm-refresh-btn" class="btn btn-primary" onclick="refreshMultimodalPrecheck()">
-            刷新训练前置状态
+            刷新状态
         </button>
     </div>
 
     <div id="mm-train-panel" class="dataset-build-panel baseline-build-panel" style="display: none; margin-top: 12px;">
         <div class="dataset-build-header">
             <div>
-                <div class="dataset-build-title">多模态训练进度</div>
+                <div class="dataset-build-title">一体化训练进度</div>
                 <div class="dataset-build-message" id="mm-build-message">准备中...</div>
             </div>
             <div class="dataset-build-percent baseline-build-percent" id="mm-build-percent">0%</div>
@@ -128,12 +144,12 @@
     </div>
 
     <div id="mm-train-complete" style="display: none; margin-top: 12px; padding: 12px; border-radius: 8px; background: #dcfce7; color: #166534;">
-        多模态模型训练完成，已刷新模型信息。
+        一体化训练完成，离线数据集与多模态模型均已更新。
     </div>
     <div id="mm-train-error" style="display: none; margin-top: 12px; padding: 12px; border-radius: 8px; background: #fee2e2; color: #991b1b;"></div>
 </div>
 
-<div class="card">
+<div id="legacy-build-card" class="card" style="display: none;">
     <h2>⚙️ 构建配置</h2>
     <div class="dataset-form-grid">
         <div class="form-group">
@@ -189,8 +205,8 @@
     </div>
 </div>
 
-<div class="card">
-    <h2>🧠 基线训练配置</h2>
+<div id="quality-pane-baseline" class="card" style="display: none;">
+    <h2>🧠 基线训练与评估</h2>
     <div class="dataset-form-grid">
         <div class="form-group">
             <label for="baseline-model-type">模型类型</label>
@@ -239,10 +255,7 @@
         </div>
         <div class="dataset-build-detail" id="baseline-build-detail">等待任务启动...</div>
     </div>
-</div>
-
-<div class="card">
-    <h2>📈 最新基线评估</h2>
+    <h2 style="margin-top: 16px;">📈 最新基线评估</h2>
     <div class="baseline-report-toolbar">
         <button
             id="baseline-raw-json-btn"
@@ -264,6 +277,25 @@
 </div>
 
 <div class="card">
+    <h2>🧪 数据集质量评估</h2>
+    <div class="dataset-note" style="margin-bottom: 10px;">
+        模型训练完成后，可打开详细页签查看基线训练与评估、离线评估、截面回测、样本回放、输出与样本五项结果。
+    </div>
+    <div class="dataset-action-row">
+        <button id="quality-assess-btn" class="btn btn-primary" onclick="openQualityAssessment()" disabled>
+            训练完成后可打开数据集质量评估
+        </button>
+    </div>
+    <div id="quality-tabs" class="dataset-action-row" style="display: none; margin-top: 12px;">
+        <button id="quality-tab-baseline" class="btn btn-primary" onclick="switchQualityPane('baseline')">基线训练与评估</button>
+        <button id="quality-tab-evaluation" class="btn btn-primary" onclick="switchQualityPane('evaluation')">离线评估</button>
+        <button id="quality-tab-backtest" class="btn btn-primary" onclick="switchQualityPane('backtest')">截面回测</button>
+        <button id="quality-tab-sample" class="btn btn-primary" onclick="switchQualityPane('sample')">样本回放</button>
+        <button id="quality-tab-artifacts" class="btn btn-primary" onclick="switchQualityPane('artifacts')">输出与样本</button>
+    </div>
+</div>
+
+<div id="quality-pane-evaluation" class="card" style="display: none;">
     <h2>🧪 离线评估</h2>
     <div class="dataset-form-grid">
         <div class="form-group">
@@ -319,7 +351,7 @@
     <div id="model-evaluate-result" class="dataset-empty" style="display: none;"></div>
 </div>
 
-<div class="card">
+<div id="quality-pane-backtest" class="card" style="display: none;">
     <h2>📉 截面回测</h2>
     <div class="dataset-form-grid">
         <div class="form-group">
@@ -417,15 +449,16 @@
     </div>
 </div>
 
-<div class="card">
-    <h2>📦 输出文件</h2>
+<div id="quality-pane-artifacts" class="card" style="display: none;">
+    <h2>📦 输出与样本</h2>
+    <div class="dataset-note" style="margin-bottom: 10px;">
+        用于核对离线数据文件是否完整，以及抽样检查样本字段与取值是否正确。
+    </div>
+    <h3 style="margin: 0 0 10px 0;">输出文件</h3>
     <div id="dataset-output-grid" class="dataset-output-grid">
         <div class="loading">正在读取数据集信息</div>
     </div>
-</div>
-
-<div class="card">
-    <h2>🔎 样本预览</h2>
+    <h3 style="margin: 16px 0 10px 0;">样本预览</h3>
     <div id="dataset-preview-empty" class="dataset-empty">
         当前还没有可用的数据集样本。
     </div>
@@ -439,7 +472,7 @@
     </div>
 </div>
 
-<div class="card">
+<div id="quality-pane-sample" class="card" style="display: none;">
     <h2>🧭 样本回放（无泄漏校验）</h2>
     <div class="dataset-form-grid">
         <div class="form-group">
@@ -477,6 +510,10 @@ let lastMultimodalTrainEndTime = null;
 let baselineStatusSyncInitialized = false;
 let multimodalStatusSyncInitialized = false;
 let multimodalPrecheckCache = null;
+let lastKnownDatasetBuildStatus = null;
+let lastKnownMultimodalStatus = null;
+let jointPipelineContext = null;
+let qualityAssessmentReady = false;
 let toastTimer = null;
 let evaluateRunning = false;
 let backtestRunning = false;
@@ -514,12 +551,77 @@ const COLUMN_NAME_MAP = {
     ma10_gt_ma20: '10日均线高于20日均线',
     volume_ratio: '量比',
     news_count: '新闻数量',
+    avg_sentiment: '平均情感',
     weighted_sentiment: '加权情绪',
+    avg_importance: '平均重要性',
+    max_importance: '最大重要性',
+    positive_ratio: '正面占比',
+    negative_ratio: '负面占比',
+    source_count: '来源数量',
+    source_entropy: '来源熵',
     news_impact_total: '新闻影响总分',
-    news_impact_max: '新闻影响峰值',
-    news_title_hits: '标题关键词命中',
+    news_impact_abs_total: '新闻绝对影响总分',
+    news_sentiment_abs_sum: '情感绝对值总和',
+    event_shock_flag: '事件冲击标记',
+    sentiment_ewm_3d: '情感3日指数均值',
+    sentiment_ewm_5d: '情感5日指数均值',
+    importance_ewm_3d: '重要性3日指数均值',
+    importance_ewm_5d: '重要性5日指数均值',
+    news_count_ewm_5d: '新闻数量5日指数均值',
+    impact_ewm_5d: '影响总分5日指数均值',
+    static_concept_count: '概念标签数量',
+    static_listing_days: '上市天数',
+    relevance_mean: '相关性均值',
+    relevance_max: '相关性最大值',
+    relevance_std: '相关性标准差',
+    relevance_strong_ratio: '强相关占比',
     label_up_5d: '5日上涨标签',
     future_ret_5d: '未来5日收益率'
+};
+
+const SECTOR_SUFFIX_MAP = {
+    bank: '银行',
+    broker: '证券',
+    insurance: '保险',
+    real_estate: '地产',
+    auto: '汽车',
+    technology: '科技',
+    healthcare: '医药',
+    consumer: '消费',
+    energy: '能源',
+    defense: '军工',
+    infrastructure: '基建',
+    media: '传媒',
+    education: '教育',
+    agriculture: '农业',
+    transport: '交通',
+    baijiu: '白酒',
+    home_appliance: '家电'
+};
+
+const EVENT_SUFFIX_MAP = {
+    rrr_cut: '央行降准',
+    rate_cut: '央行降息',
+    ipo: 'IPO',
+    earnings_report: '财报发布',
+    policy_positive: '政策利好',
+    policy_negative: '政策利空',
+    mna: '并购重组',
+    earnings_positive: '业绩预增',
+    earnings_negative: '业绩预减',
+    insider_buy: '高管增持',
+    insider_sell: '高管减持'
+};
+
+const STATIC_SECTOR_SUFFIX_MAP = {
+    financial: '金融',
+    consumer: '消费',
+    real_estate: '地产',
+    transport: '交通',
+    manufacturing: '制造',
+    healthcare: '医疗',
+    technology: '科技',
+    energy: '能源'
 };
 
 const METRIC_NAME_MAP = {
@@ -574,6 +676,7 @@ const METRIC_ORDER = [
 ];
 
 document.addEventListener('DOMContentLoaded', async function() {
+    updateQualityAssessmentButton(false);
     await loadDatasetInfo();
     await loadMultimodalModelInfo();
     await syncDatasetBuildStatus();
@@ -636,6 +739,82 @@ function renderDatasetInfo(data) {
     renderPreview(data.preview || { columns: [], rows: [] });
 }
 
+function updateQualityAssessmentButton(ready) {
+    const button = document.getElementById('quality-assess-btn');
+    if (!button) {
+        return;
+    }
+
+    if (jointPipelineContext && jointPipelineContext.running) {
+        ready = false;
+    }
+
+    qualityAssessmentReady = !!ready;
+    button.disabled = !qualityAssessmentReady;
+    button.textContent = qualityAssessmentReady
+        ? '打开数据集质量评估'
+        : '训练完成后可打开数据集质量评估';
+
+    if (!qualityAssessmentReady) {
+        const tabs = document.getElementById('quality-tabs');
+        if (tabs) {
+            tabs.style.display = 'none';
+        }
+        ['quality-pane-baseline', 'quality-pane-evaluation', 'quality-pane-backtest', 'quality-pane-sample', 'quality-pane-artifacts'].forEach(id => {
+            const pane = document.getElementById(id);
+            if (pane) {
+                pane.style.display = 'none';
+            }
+        });
+    }
+}
+
+function openQualityAssessment() {
+    if (!qualityAssessmentReady) {
+        showToast('请先完成一体化训练，再打开数据集质量评估', 'info');
+        return;
+    }
+
+    const tabs = document.getElementById('quality-tabs');
+    if (tabs) {
+        tabs.style.display = 'flex';
+    }
+    switchQualityPane('baseline');
+}
+
+function switchQualityPane(type) {
+    const paneMap = {
+        baseline: 'quality-pane-baseline',
+        evaluation: 'quality-pane-evaluation',
+        backtest: 'quality-pane-backtest',
+        sample: 'quality-pane-sample',
+        artifacts: 'quality-pane-artifacts',
+    };
+    const tabMap = {
+        baseline: 'quality-tab-baseline',
+        evaluation: 'quality-tab-evaluation',
+        backtest: 'quality-tab-backtest',
+        sample: 'quality-tab-sample',
+        artifacts: 'quality-tab-artifacts',
+    };
+
+    Object.entries(paneMap).forEach(([key, paneId]) => {
+        const paneEl = document.getElementById(paneId);
+        if (paneEl) {
+            paneEl.style.display = key === type ? 'block' : 'none';
+        }
+    });
+
+    Object.entries(tabMap).forEach(([key, tabId]) => {
+        const tabEl = document.getElementById(tabId);
+        if (!tabEl) {
+            return;
+        }
+        tabEl.classList.remove('btn-primary', 'btn-success');
+        tabEl.classList.add(key === type ? 'btn-success' : 'btn-primary');
+    });
+}
+
 function renderMultimodalPrecheck(precheck) {
     multimodalPrecheckCache = precheck || null;
 
@@ -694,10 +873,8 @@ function renderMultimodalPrecheck(precheck) {
     const inputReady = inputs.length > 0 && inputs.every(item => !!item.ready);
     const featureReady = featureGroups.length > 0 && featureGroups.every(item => !!item.ready);
     const tfReady = !!(precheck && precheck.tensorflow_available);
-    const finalReady = inputReady && tfReady;
-
-    if (finalReady) {
-        const suffix = featureReady ? '四类特征状态正常，可开始 heavy 模型训练。' : '可训练，但部分特征分组缺失，建议先补齐后再训。';
+    if (tfReady && inputReady) {
+        const suffix = featureReady ? '四类特征状态正常，可直接启动一体化训练。' : '可训练，但部分特征分组缺失，建议先补齐后再训。';
         summaryEl.style.background = '#dcfce7';
         summaryEl.style.color = '#166534';
         summaryEl.textContent = `训练前置检查通过。${suffix}`;
@@ -705,9 +882,9 @@ function renderMultimodalPrecheck(precheck) {
         summaryEl.style.background = '#fee2e2';
         summaryEl.style.color = '#991b1b';
         if (!tfReady) {
-            summaryEl.textContent = '当前环境未启用 TensorFlow，无法进行多模态模型训练。';
+            summaryEl.textContent = '当前环境未启用 TensorFlow，无法进行一体化训练。';
         } else {
-            summaryEl.textContent = '训练前置检查未通过：请先完成 model_dataset / market_daily / news_raw 构建。';
+            summaryEl.textContent = '检测到训练输入尚未构建，启动一体化训练后会先自动构建 model_dataset / market_daily / news_raw。';
         }
     }
 
@@ -724,9 +901,11 @@ async function loadMultimodalModelInfo() {
         const response = await fetch('/api/model/info');
         const payload = await response.json();
         const model = payload.model || null;
+        const modelReady = !!payload.model_available;
 
         if (!model) {
             detailsEl.innerHTML = '<div style="color:#92400e;">尚未发现可用模型，训练后会在这里显示版本信息。</div>';
+            updateQualityAssessmentButton(false);
             return;
         }
 
@@ -738,7 +917,6 @@ async function loadMultimodalModelInfo() {
         detailsEl.innerHTML = `
             <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:8px;">
                 <div><span style="color:#64748b;">运行后端</span><br><strong>${escapeHtml(model.runtime_backend || model.backend || '-')}</strong></div>
-                <div><span style="color:#64748b;">模型模式</span><br><strong>${escapeHtml(model.model_tier || 'heavy')}</strong></div>
                 <div><span style="color:#64748b;">训练样本</span><br><strong>${model.training_samples || 0}</strong></div>
                 <div><span style="color:#64748b;">文本维度</span><br><strong>${featureDims.text || 0}</strong></div>
                 <div><span style="color:#64748b;">验证准确率</span><br><strong>${valAcc !== undefined && valAcc !== null ? `${(valAcc * 100).toFixed(2)}%` : '-'}</strong></div>
@@ -746,9 +924,11 @@ async function loadMultimodalModelInfo() {
             </div>
             ${model.candidate_only ? '<div style="margin-top:8px; color:#92400e;">当前版本未超过结构化基线，仅保存为候选模型。</div>' : ''}
         `;
+        updateQualityAssessmentButton(modelReady);
     } catch (error) {
         console.error('加载多模态模型信息失败:', error);
         detailsEl.innerHTML = `<div class="error">读取模型信息失败: ${escapeHtml(error.message)}</div>`;
+        updateQualityAssessmentButton(false);
     }
 }
 
@@ -760,19 +940,29 @@ function updateMultimodalTrainButtonState(isTraining) {
 
     if (isTraining) {
         button.disabled = true;
-        button.textContent = '训练中...';
+        button.textContent = '一体化训练中...';
         return;
     }
 
     const precheck = multimodalPrecheckCache || {};
-    const inputs = Array.isArray(precheck.inputs) ? precheck.inputs : [];
-    const inputReady = inputs.length > 0 && inputs.every(item => !!item.ready);
     const tfReady = !!precheck.tensorflow_available;
-    const canStart = inputReady && tfReady;
+    const canStart = tfReady && !(jointPipelineContext && jointPipelineContext.running);
 
     button.disabled = !canStart;
-    button.textContent = '开始多模态模型训练';
-    button.title = canStart ? '使用 heavy 模式启动训练' : '请先满足训练前置条件';
+    button.textContent = '开始一体化训练';
+    button.title = canStart ? '先构建离线数据集，再训练 TensorFlow 多模态模型' : '请先启用 TensorFlow 后再训练';
+}
+
+function readJointPipelineParams() {
+    return {
+        stocks: parseInt(document.getElementById('joint-stocks').value || '80', 10),
+        days: parseInt(document.getElementById('joint-days').value || '240', 10),
+        epochs: parseInt(document.getElementById('joint-epochs').value || '60', 10),
+        horizon: parseInt(document.getElementById('joint-horizon').value || '5', 10),
+        label_threshold: parseFloat(document.getElementById('joint-threshold').value || '0.01'),
+        force_refresh: document.getElementById('joint-force-refresh').checked,
+        refresh_news: document.getElementById('joint-refresh-news').checked
+    };
 }
 
 async function startMultimodalTrain() {
@@ -782,12 +972,27 @@ async function startMultimodalTrain() {
     const errorEl = document.getElementById('mm-train-error');
 
     const precheck = multimodalPrecheckCache || {};
-    const inputs = Array.isArray(precheck.inputs) ? precheck.inputs : [];
-    const inputReady = inputs.length > 0 && inputs.every(item => !!item.ready);
-    if (!inputReady || !precheck.tensorflow_available) {
-        showToast('训练前置检查未通过，请先完成数据构建或启用 TensorFlow', 'error');
+    if (!precheck.tensorflow_available) {
+        showToast('当前环境未启用 TensorFlow，无法启动一体化训练', 'error');
         return;
     }
+
+    if (jointPipelineContext && jointPipelineContext.running) {
+        showToast('一体化训练任务正在执行中，请稍候', 'info');
+        return;
+    }
+
+    const params = readJointPipelineParams();
+    updateQualityAssessmentButton(false);
+
+    jointPipelineContext = {
+        running: true,
+        phase: 'building',
+        build_launched: false,
+        train_launched: false,
+        start_time: new Date().toISOString(),
+        params
+    };
 
     button.disabled = true;
     button.textContent = '启动中...';
@@ -796,36 +1001,183 @@ async function startMultimodalTrain() {
     errorEl.style.display = 'none';
     updateMultimodalPanel({
         progress: 0,
-        message: '正在提交任务...',
+        message: '正在启动离线数据集构建...',
         error: null,
+        detail_text: '第一阶段：构建 model_dataset / market_daily / news_raw',
     });
 
     try {
-        const response = await fetch('/api/model/train', {
+        const response = await fetch('/api/dataset/build', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                stocks: parseInt(document.getElementById('mm-train-stocks').value || '80', 10),
-                days: parseInt(document.getElementById('mm-train-days').value || '240', 10),
-                epochs: parseInt(document.getElementById('mm-train-epochs').value || '60', 10),
-            })
+            body: JSON.stringify(params)
         });
 
         const payload = await response.json();
         if (!response.ok || !payload.success) {
-            if (payload.precheck) {
-                renderMultimodalPrecheck(payload.precheck);
-            }
-            throw new Error(payload.message || '启动多模态训练失败');
+            throw new Error(payload.message || '启动离线数据集构建失败');
         }
 
-        await syncMultimodalTrainStatus();
+        jointPipelineContext.build_launched = true;
+        showToast('已启动离线数据构建，完成后将自动进入模型训练', 'info');
+        await syncDatasetBuildStatus();
     } catch (error) {
-        console.error('启动多模态训练失败:', error);
+        console.error('启动一体化训练失败:', error);
+        await finishJointPipelineWithError(`启动失败: ${error.message}`);
+    }
+}
+
+async function triggerJointMultimodalTrain() {
+    if (!jointPipelineContext || !jointPipelineContext.running || jointPipelineContext.train_launched) {
+        return;
+    }
+
+    const response = await fetch('/api/model/train', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            stocks: jointPipelineContext.params.stocks,
+            days: jointPipelineContext.params.days,
+            epochs: jointPipelineContext.params.epochs
+        })
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) {
+        if (payload.precheck) {
+            renderMultimodalPrecheck(payload.precheck);
+        }
+        throw new Error(payload.message || '启动模型训练失败');
+    }
+
+    jointPipelineContext.phase = 'training';
+    jointPipelineContext.train_launched = true;
+}
+
+async function finishJointPipelineWithError(message) {
+    const completeEl = document.getElementById('mm-train-complete');
+    const errorEl = document.getElementById('mm-train-error');
+    const normalized = message || '一体化训练失败';
+
+    if (errorEl) {
         errorEl.style.display = 'block';
-        errorEl.textContent = `启动失败: ${error.message}`;
-        showToast(`多模态训练启动失败：${error.message}`, 'error');
-        updateMultimodalTrainButtonState(false);
+        errorEl.textContent = normalized;
+    }
+    if (completeEl) {
+        completeEl.style.display = 'none';
+    }
+
+    jointPipelineContext = null;
+    updateMultimodalTrainButtonState(false);
+    showToast(normalized, 'error');
+}
+
+function buildMultimodalTrainToast(status) {
+    const result = (status && status.result) || {};
+    if (result.production_model_replaced === false) {
+        return {
+            type: 'info',
+            message: '多模态训练完成：新模型未超过基线，已保存候选模型，线上模型保持不变',
+        };
+    }
+    return {
+        type: 'success',
+        message: '多模态训练完成，已刷新模型信息',
+    };
+}
+
+async function finishJointPipelineSuccess() {
+    const completeEl = document.getElementById('mm-train-complete');
+    const errorEl = document.getElementById('mm-train-error');
+
+    if (errorEl) {
+        errorEl.style.display = 'none';
+    }
+    if (completeEl) {
+        completeEl.style.display = 'block';
+    }
+
+    jointPipelineContext = null;
+    updateMultimodalTrainButtonState(false);
+    updateQualityAssessmentButton(true);
+    await loadDatasetInfo();
+    await loadMultimodalModelInfo();
+    const toast = buildMultimodalTrainToast(lastKnownMultimodalStatus || {});
+    showToast(`${toast.message}。可点击“数据集质量评估”查看详细结果`, toast.type);
+}
+
+async function syncJointPipelineStatus() {
+    if (!jointPipelineContext || !jointPipelineContext.running) {
+        return;
+    }
+
+    const buildStatus = lastKnownDatasetBuildStatus || {};
+    const trainStatus = lastKnownMultimodalStatus || {};
+
+    if (jointPipelineContext.phase === 'building') {
+        if (buildStatus.error) {
+            await finishJointPipelineWithError(`离线数据构建失败：${buildStatus.error}`);
+            return;
+        }
+
+        const buildProgress = Number(buildStatus.progress || 0);
+        updateMultimodalPanel({
+            progress: Math.min(50, Math.round(buildProgress * 0.5)),
+            message: `第一阶段：离线数据构建（${buildProgress}%）`,
+            detail: buildStatus.detail || null,
+            start_time: buildStatus.start_time || jointPipelineContext.start_time,
+            error: null
+        });
+
+        if (buildStatus.is_building) {
+            return;
+        }
+
+        if (buildStatus.progress === 100 && buildStatus.end_time) {
+            updateMultimodalPanel({
+                progress: 50,
+                message: '离线数据构建完成，正在启动多模态训练...',
+                detail_text: '第二阶段：TensorFlow heavy 训练',
+                error: null
+            });
+
+            try {
+                await loadDatasetInfo();
+                await triggerJointMultimodalTrain();
+            } catch (error) {
+                await finishJointPipelineWithError(`启动模型训练失败：${error.message}`);
+            }
+        }
+        return;
+    }
+
+    if (jointPipelineContext.phase === 'training') {
+        if (trainStatus.error) {
+            await finishJointPipelineWithError(`模型训练失败：${trainStatus.error}`);
+            return;
+        }
+
+        const trainProgress = Number(trainStatus.progress || 0);
+        const epochCurrent = Number(trainStatus.current_epoch || 0);
+        const epochTotal = Number(trainStatus.total_epochs || (jointPipelineContext.params && jointPipelineContext.params.epochs) || 0);
+        const epochText = epochTotal > 0 ? `训练轮数: ${epochCurrent}/${epochTotal}` : '训练轮数: -';
+        updateMultimodalPanel({
+            progress: 50 + Math.min(50, Math.round(trainProgress * 0.5)),
+            message: `第二阶段：多模态模型训练（${trainProgress}%）`,
+            detail_text: `${epochText} | ${trainStatus.message || '正在训练 TensorFlow heavy 模型'}`,
+            start_time: trainStatus.start_time || jointPipelineContext.start_time,
+            error: null
+        });
+
+        if (trainStatus.is_training) {
+            return;
+        }
+
+        if (trainStatus.progress === 100 && trainStatus.end_time) {
+            await finishJointPipelineSuccess();
+            if (trainStatus.end_time !== lastMultimodalTrainEndTime) {
+                lastMultimodalTrainEndTime = trainStatus.end_time;
+            }
+        }
     }
 }
 
@@ -838,6 +1190,7 @@ async function syncMultimodalTrainStatus() {
         }
 
         const status = payload.status || {};
+        lastKnownMultimodalStatus = status;
         if (!multimodalStatusSyncInitialized) {
             multimodalStatusSyncInitialized = true;
             if (status.end_time) {
@@ -855,6 +1208,17 @@ async function syncMultimodalTrainStatus() {
             status.start_time ||
             status.end_time
         );
+
+        if (jointPipelineContext && jointPipelineContext.running) {
+            if (hasRuntimeInfo) {
+                panel.style.display = 'block';
+            }
+            completeEl.style.display = 'none';
+            errorEl.style.display = 'none';
+            updateMultimodalTrainButtonState(true);
+            await syncJointPipelineStatus();
+            return;
+        }
 
         if (hasRuntimeInfo) {
             panel.style.display = 'block';
@@ -875,6 +1239,7 @@ async function syncMultimodalTrainStatus() {
             } else if (status.progress === 100) {
                 completeEl.style.display = 'block';
                 errorEl.style.display = 'none';
+                updateQualityAssessmentButton(true);
             }
 
             if (status.end_time && status.end_time !== lastMultimodalTrainEndTime) {
@@ -884,7 +1249,8 @@ async function syncMultimodalTrainStatus() {
                 if (status.error) {
                     showToast(`多模态训练失败：${status.error}`, 'error');
                 } else {
-                    showToast('多模态训练完成，已刷新模型信息', 'success');
+                    const toast = buildMultimodalTrainToast(status);
+                    showToast(toast.message, toast.type);
                 }
             }
         }
@@ -897,6 +1263,10 @@ function updateMultimodalPanel(status) {
     const progress = status.progress || 0;
     const message = status.message || '等待任务启动...';
     const error = status.error || null;
+    const detail = status.detail || null;
+    const detailText = status.detail_text || null;
+    const epochCurrent = Number(status.current_epoch || 0);
+    const epochTotal = Number(status.total_epochs || 0);
 
     document.getElementById('mm-progress-fill').style.width = `${progress}%`;
     document.getElementById('mm-build-percent').textContent = `${progress}%`;
@@ -910,7 +1280,15 @@ function updateMultimodalPanel(status) {
     }
 
     detailEl.style.color = '#5f6b7a';
-    if (status.start_time) {
+    if (detailText) {
+        detailEl.textContent = detailText;
+    } else if (epochTotal > 0) {
+        detailEl.textContent = `训练轮数: ${epochCurrent}/${epochTotal}`;
+    } else if (detail && detail.processed && detail.total) {
+        detailEl.textContent = `当前进度: ${detail.processed}/${detail.total} | 最近处理: ${detail.stock_code || '-'}`;
+    } else if (detail && detail.processed_stocks !== undefined) {
+        detailEl.textContent = `已处理股票: ${detail.processed_stocks} | 样本数: ${(detail.row_counts && detail.row_counts.model_dataset) || 0}`;
+    } else if (status.start_time) {
         detailEl.textContent = `任务开始时间: ${formatDateTime(status.start_time)}`;
     } else {
         detailEl.textContent = '等待任务启动...';
@@ -920,6 +1298,7 @@ function updateMultimodalPanel(status) {
 async function refreshMultimodalPrecheck() {
     await loadDatasetInfo();
     await loadMultimodalModelInfo();
+    await syncDatasetBuildStatus();
     await syncMultimodalTrainStatus();
 }
 
@@ -1774,6 +2153,7 @@ async function syncDatasetBuildStatus() {
         }
 
         const status = payload.status || {};
+        lastKnownDatasetBuildStatus = status;
         const panel = document.getElementById('dataset-build-panel');
         const button = document.getElementById('dataset-build-btn');
 
@@ -1794,6 +2174,10 @@ async function syncDatasetBuildStatus() {
                 lastDatasetBuildEndTime = status.end_time;
                 await loadDatasetInfo();
             }
+        }
+
+        if (jointPipelineContext && jointPipelineContext.running) {
+            await syncJointPipelineStatus();
         }
     } catch (error) {
         console.error('同步构建状态失败:', error);
@@ -1928,7 +2312,34 @@ function getOutputLabel(name) {
 }
 
 function getColumnLabel(column) {
-    return COLUMN_NAME_MAP[column] || column;
+    const name = String(column || '');
+    if (COLUMN_NAME_MAP[name]) {
+        return COLUMN_NAME_MAP[name];
+    }
+
+    if (name.startsWith('sector_')) {
+        const suffix = name.slice('sector_'.length);
+        return `行业影响（${SECTOR_SUFFIX_MAP[suffix] || suffix}）`;
+    }
+    if (name.startsWith('event_')) {
+        const suffix = name.slice('event_'.length);
+        const base = suffix.endsWith('_count') ? suffix.slice(0, -6) : suffix;
+        const label = EVENT_SUFFIX_MAP[base] || base;
+        return suffix.endsWith('_count') ? `事件计数（${label}）` : `事件特征（${label}）`;
+    }
+    if (name.startsWith('stock_sector_')) {
+        const suffix = name.slice('stock_sector_'.length);
+        return `公司行业标签（${STATIC_SECTOR_SUFFIX_MAP[suffix] || suffix}）`;
+    }
+    if (name.startsWith('relevance_')) {
+        const suffix = name.slice('relevance_'.length);
+        return `相关性特征（${suffix}）`;
+    }
+    if (name.startsWith('static_')) {
+        const suffix = name.slice('static_'.length);
+        return `静态特征（${suffix}）`;
+    }
+    return name;
 }
 
 function getModelLabel(modelType) {

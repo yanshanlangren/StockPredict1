@@ -2,12 +2,12 @@
 
 {% block content %}
 <div class="card">
-    <h2>🔮 批量预测 - 发现潜力股</h2>
+    <h2>⭐ 股票推荐 - 基于当前模型筛选潜力股</h2>
     
     <!-- 模型状态提示 -->
     <div id="model-warning" style="display: none; margin-bottom: 20px; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
         <strong>⚠️ 模型未训练</strong>
-        <p style="margin: 5px 0 0 0;">请先在“模型训练”页面完成多模态训练后再进行预测。</p>
+        <p style="margin: 5px 0 0 0;">请先在“模型训练”页面完成一体化训练后再进行股票推荐。</p>
     </div>
     
     <!-- 预测配置 -->
@@ -15,32 +15,38 @@
         <h3 style="margin: 0 0 15px 0; font-size: 16px;">⚙️ 预测配置</h3>
         <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px;">
             <div>
-                <label style="display: block; margin-bottom: 5px; font-weight: 500;">返回数量 (Top N)</label>
-                <input type="number" id="top-n" value="20" min="5" max="200" 
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">推荐数量 (Top N)</label>
+                <input type="number" id="top-n" value="30" min="5" max="200" 
                        style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                <small style="color: #888;">按预期收益排序后返回</small>
+                <small style="color: #888;">按预期收益排序输出推荐</small>
             </div>
             <div>
                 <label style="display: block; margin-bottom: 5px; font-weight: 500;">历史K线天数</label>
-                <input type="number" id="kline-days" value="120" min="60" max="600" 
+                <input type="number" id="kline-days" value="240" min="60" max="600" 
                        style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                <small style="color: #888;">用于技术特征计算</small>
+                <small style="color: #888;">当前模型建议窗口</small>
             </div>
             <div>
                 <label style="display: block; margin-bottom: 5px; font-weight: 500;">每股新闻条数上限</label>
-                <input type="number" id="news-limit" value="20" min="1" max="100" 
+                <input type="number" id="news-limit" value="30" min="1" max="100" 
                        style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                <small style="color: #888;">批量预测新闻融合上限</small>
+                <small style="color: #888;">新闻融合上限（模型优化）</small>
+            </div>
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">新闻时效窗口（小时）</label>
+                <input type="number" id="news-age-hours" value="72" min="1" max="2160"
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <small style="color: #888;">仅使用最近 N 小时新闻</small>
             </div>
             <div>
                 <label style="display: block; margin-bottom: 5px; font-weight: 500;">最低价格 (元)</label>
-                <input type="number" id="min-price" value="0" min="0" step="0.1"
+                <input type="number" id="min-price" value="2" min="0" step="0.1"
                        style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                 <small style="color: #888;">过滤低价股</small>
             </div>
             <div style="grid-column: span 2;">
                 <label style="display: block; margin-bottom: 5px; font-weight: 500;">最高价格 (元)</label>
-                <input type="number" id="max-price" value="1000" min="0" step="1"
+                <input type="number" id="max-price" value="300" min="0" step="1"
                        style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                 <small style="color: #888;">过滤高价股</small>
             </div>
@@ -56,14 +62,14 @@
         
         <!-- 时间预估 -->
         <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 4px; font-size: 13px; color: #666;">
-            ⏱️ 默认会扫描缓存中的全部股票；当前模型输出固定为未来 <strong>5</strong> 个交易日方向与收益预估。
+            ⏱️ 默认会扫描缓存中的全部股票；参数会按当前线上模型自动优化。模型输出固定为未来 <strong>5</strong> 个交易日方向与收益预估。
         </div>
     </div>
     
     <!-- 预测按钮 -->
     <button id="predict-btn" onclick="startBatchPredict()" 
             style="width: 100%; padding: 12px; font-size: 16px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
-        🚀 开始预测
+        🚀 开始推荐
     </button>
     
     <!-- 预测进度 -->
@@ -80,7 +86,7 @@
 <!-- 预测结果 -->
 <div id="predict-results" style="display: none; margin-top: 20px;">
     <div class="card">
-        <h2>📊 预测结果</h2>
+        <h2>📊 股票推荐结果</h2>
         
         <!-- 统计信息 -->
         <div id="result-stats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 15px; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
@@ -111,7 +117,7 @@
         <div id="tips-section" style="margin-top: 20px; padding: 15px; background: #e7f3ff; border-radius: 8px; border-left: 4px solid #007bff;">
             <strong>💡 使用提示</strong>
             <ul style="margin: 10px 0 0 0; padding-left: 20px; color: #333;">
-                <li>预测结果基于多模态模型，融合新闻情感、技术指标和相关性分析</li>
+                <li>推荐结果基于当前线上模型，融合新闻情感、技术指标和相关性分析</li>
                 <li id="horizon-tip">预期收益为模型默认未来5日收益估计</li>
                 <li>置信度越高表示模型越确定预测方向</li>
                 <li>建议结合其他指标综合判断，不构成投资建议</li>
@@ -124,7 +130,7 @@
 <div id="no-results" style="display: none; margin-top: 20px;" class="card">
     <div style="text-align: center; padding: 40px;">
         <div style="font-size: 50px; margin-bottom: 15px;">📉</div>
-        <div style="font-size: 18px; margin-bottom: 10px;">暂无符合条件的预测结果</div>
+        <div style="font-size: 18px; margin-bottom: 10px;">暂无符合条件的推荐结果</div>
         <div style="color: #666;">请尝试调整筛选条件或稍后再试</div>
     </div>
 </div>
@@ -137,41 +143,97 @@ document.addEventListener('DOMContentLoaded', async function() {
     await checkModelStatus();
 });
 
+function applyModelOptimizedParams(model) {
+    if (!model) {
+        return;
+    }
+
+    const backend = String(model.runtime_backend || model.backend || '').toLowerCase();
+    const isTensorFlowOnline = backend === 'tensorflow' && !!model.available;
+
+    if (!isTensorFlowOnline) {
+        return;
+    }
+
+    document.getElementById('top-n').value = 30;
+    document.getElementById('kline-days').value = 240;
+    document.getElementById('news-limit').value = 30;
+    document.getElementById('news-age-hours').value = 72;
+    document.getElementById('min-price').value = 2;
+    document.getElementById('max-price').value = 300;
+    document.getElementById('batch-use-news').checked = true;
+    document.getElementById('batch-use-relevance').checked = true;
+}
+
 // 检查模型状态
 async function checkModelStatus() {
     try {
         const response = await fetch('/api/model/info');
         const data = await response.json();
+        applyModelOptimizedParams(data.model || null);
         
         if (!data.model_available) {
             document.getElementById('model-warning').style.display = 'block';
             document.getElementById('predict-btn').disabled = true;
             document.getElementById('predict-btn').style.background = '#6c757d';
-            document.getElementById('predict-btn').textContent = '⚠️ 请先训练模型';
+            document.getElementById('predict-btn').textContent = '⚠️ 请先完成模型训练';
         }
     } catch (error) {
         console.error('检查模型状态失败:', error);
     }
 }
 
-// 开始批量预测
+function sanitizeIntInput(elementId, fallback, minValue, maxValue) {
+    const element = document.getElementById(elementId);
+    const raw = Number.parseInt((element && element.value) || '', 10);
+    let value = Number.isFinite(raw) ? raw : fallback;
+    if (Number.isFinite(minValue)) {
+        value = Math.max(minValue, value);
+    }
+    if (Number.isFinite(maxValue)) {
+        value = Math.min(maxValue, value);
+    }
+    if (element) {
+        element.value = String(value);
+    }
+    return value;
+}
+
+function sanitizeFloatInput(elementId, fallback, minValue, maxValue) {
+    const element = document.getElementById(elementId);
+    const raw = Number.parseFloat((element && element.value) || '');
+    let value = Number.isFinite(raw) ? raw : fallback;
+    if (Number.isFinite(minValue)) {
+        value = Math.max(minValue, value);
+    }
+    if (Number.isFinite(maxValue)) {
+        value = Math.min(maxValue, value);
+    }
+    if (element) {
+        element.value = String(value);
+    }
+    return value;
+}
+
+// 开始股票推荐
 async function startBatchPredict() {
     const btn = document.getElementById('predict-btn');
-    const topN = document.getElementById('top-n').value;
-    const klineDays = document.getElementById('kline-days').value;
-    const newsLimit = document.getElementById('news-limit').value;
+    const topN = sanitizeIntInput('top-n', 30, 1, 200);
+    const klineDays = sanitizeIntInput('kline-days', 240, 60, 600);
+    const newsLimit = sanitizeIntInput('news-limit', 30, 1, 100);
+    const newsAgeHours = sanitizeIntInput('news-age-hours', 72, 1, 2160);
     const useNews = document.getElementById('batch-use-news').checked;
     const useRelevance = document.getElementById('batch-use-relevance').checked;
-    const minPrice = document.getElementById('min-price').value;
-    const maxPrice = document.getElementById('max-price').value;
+    const minPrice = sanitizeFloatInput('min-price', 2, 0, 100000);
+    const maxPrice = sanitizeFloatInput('max-price', 300, 0, 100000);
 
     btn.disabled = true;
-    btn.textContent = '⏳ 预测中...';
+    btn.textContent = '⏳ 推荐中...';
     
     document.getElementById('predict-progress').style.display = 'block';
     document.getElementById('predict-results').style.display = 'none';
     document.getElementById('no-results').style.display = 'none';
-    document.getElementById('progress-message').textContent = '正在扫描缓存中的全部股票...';
+    document.getElementById('progress-message').textContent = '正在扫描缓存中的全部股票并生成推荐...';
     document.getElementById('progress-detail').textContent = '正在融合新闻与技术特征';
     document.getElementById('progress-bar').style.width = '0%';
     
@@ -182,13 +244,14 @@ async function startBatchPredict() {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                top_n: parseInt(topN),
-                kline_days: parseInt(klineDays),
-                news_limit: parseInt(newsLimit),
+                top_n: topN,
+                kline_days: klineDays,
+                news_limit: newsLimit,
+                max_news_age_hours: newsAgeHours,
                 use_news: useNews,
                 use_relevance: useRelevance,
-                min_price: parseFloat(minPrice),
-                max_price: parseFloat(maxPrice)
+                min_price: minPrice,
+                max_price: maxPrice
             })
         });
         
@@ -203,14 +266,14 @@ async function startBatchPredict() {
         if (data.success) {
             displayResults(data.data);
         } else {
-            throw new Error(data.message || '预测失败');
+            throw new Error(data.message || '股票推荐失败');
         }
     } catch (error) {
-        console.error('预测失败:', error);
-        alert('预测失败: ' + error.message);
+        console.error('股票推荐失败:', error);
+        alert('股票推荐失败: ' + error.message);
     } finally {
         btn.disabled = false;
-        btn.textContent = '🚀 开始预测';
+        btn.textContent = '🚀 开始推荐';
         document.getElementById('predict-progress').style.display = 'none';
     }
 }

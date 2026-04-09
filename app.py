@@ -13,6 +13,7 @@ import sys
 import os
 import threading
 import subprocess
+import re
 from flask import Flask, render_template, jsonify, request
 import pandas as pd
 import numpy as np
@@ -95,7 +96,11 @@ training_status = {
     'message': '',
     'start_time': None,
     'end_time': None,
-    'error': None
+    'error': None,
+    'current_epoch': 0,
+    'total_epochs': 0,
+    'result': None,
+    'params': None,
 }
 training_lock = threading.Lock()
 
@@ -166,6 +171,74 @@ def init_components():
     except Exception as e:
         logger.error(f"组件初始化失败: {e}")
         return False
+
+
+def _safe_int_param(value, default: int, min_value: int = None, max_value: int = None) -> int:
+    """安全解析整型参数，异常时回退默认值。"""
+    parsed = int(default)
+    try:
+        if value is None or isinstance(value, bool):
+            raise ValueError("invalid int value")
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                raise ValueError("empty int value")
+            numeric = float(text)
+        else:
+            numeric = float(value)
+        if not np.isfinite(numeric):
+            raise ValueError("non-finite int value")
+        parsed = int(numeric)
+    except Exception:
+        parsed = int(default)
+
+    if min_value is not None:
+        parsed = max(int(min_value), parsed)
+    if max_value is not None:
+        parsed = min(int(max_value), parsed)
+    return parsed
+
+
+def _safe_float_param(value, default: float, min_value: float = None, max_value: float = None) -> float:
+    """安全解析浮点参数，异常时回退默认值。"""
+    parsed = float(default)
+    try:
+        if value is None or isinstance(value, bool):
+            raise ValueError("invalid float value")
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                raise ValueError("empty float value")
+            numeric = float(text)
+        else:
+            numeric = float(value)
+        if not np.isfinite(numeric):
+            raise ValueError("non-finite float value")
+        parsed = float(numeric)
+    except Exception:
+        parsed = float(default)
+
+    if min_value is not None:
+        parsed = max(float(min_value), parsed)
+    if max_value is not None:
+        parsed = min(float(max_value), parsed)
+    return parsed
+
+
+def _parse_bool_param(value, default: bool = True) -> bool:
+    """安全解析布尔参数。"""
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {'1', 'true', 'yes', 'y', 'on'}:
+            return True
+        if text in {'0', 'false', 'no', 'n', 'off'}:
+            return False
+        return bool(default)
+    return bool(value)
 
 
 def _load_dataset_metadata():
@@ -668,7 +741,7 @@ def news_page():
 
 @app.route('/predict')
 def predict_page():
-    """批量预测页面"""
+    """股票推荐页面"""
     return render_template('predict.html')
 
 
@@ -744,10 +817,9 @@ def train_model():
             }), 400
         
         params = request.json if request.json else {}
-        stocks = params.get('stocks', 50)
-        days = params.get('days', 200)
-        epochs = params.get('epochs', 50)
-        model_tier = 'heavy'
+        stocks = _safe_int_param(params.get('stocks'), default=50, min_value=10, max_value=5000)
+        days = _safe_int_param(params.get('days'), default=200, min_value=60, max_value=1500)
+        epochs = _safe_int_param(params.get('epochs'), default=50, min_value=5, max_value=500)
         dataset_path = params.get('dataset_path')
         market_path = params.get('market_path')
         news_raw_path = params.get('news_raw_path')
@@ -804,11 +876,13 @@ def train_model():
             'start_time': datetime.now().isoformat(),
             'end_time': None,
             'error': None,
+            'current_epoch': 0,
+            'total_epochs': epochs,
+            'result': None,
             'params': {
                 'stocks': stocks,
                 'days': days,
                 'epochs': epochs,
-                'model_tier': model_tier,
                 'dataset_path': dataset_path,
                 'market_path': market_path,
                 'news_raw_path': news_raw_path
@@ -873,10 +947,27 @@ def train_model():
                     with training_lock:
                         training_status['progress'] = 40
                         training_status['message'] = '正在处理股票数据...'
-                elif '开始训练' in line or 'Epoch' in line:
+                elif '开始训练' in line:
                     with training_lock:
                         training_status['progress'] = 60
-                        training_status['message'] = '正在训练模型...'
+                        training_status['message'] = f'正在训练模型（第 0/{epochs} 轮）...'
+                elif 'Epoch' in line:
+                    match = re.search(r'Epoch\s+(\d+)\s*/\s*(\d+)', line, flags=re.IGNORECASE)
+                    if match:
+                        current_epoch = int(match.group(1))
+                        total_epochs = int(match.group(2))
+                        epoch_progress = 60 + int((current_epoch / max(total_epochs, 1)) * 25)
+                        with training_lock:
+                            training_status['progress'] = max(training_status.get('progress', 0), min(epoch_progress, 85))
+                            training_status['message'] = f'正在训练模型（第 {current_epoch}/{total_epochs} 轮）...'
+                            training_status['current_epoch'] = current_epoch
+                            training_status['total_epochs'] = total_epochs
+                    else:
+                        with training_lock:
+                            training_status['progress'] = max(training_status.get('progress', 0), 60)
+                            total_epochs = int(training_status.get('total_epochs') or epochs)
+                            current_epoch = int(training_status.get('current_epoch') or 0)
+                            training_status['message'] = f'正在训练模型（第 {current_epoch}/{total_epochs} 轮）...'
                 elif '保存' in line:
                     with training_lock:
                         training_status['progress'] = 90
@@ -889,20 +980,52 @@ def train_model():
             return_code = process.wait()
             
             if return_code == 0:
-                with training_lock:
-                    training_status['progress'] = 100
-                    training_status['message'] = '训练完成！'
-                    training_status['end_time'] = datetime.now().isoformat()
-                    training_status['is_training'] = False
-                
+                train_result = {
+                    'production_model_replaced': None,
+                    'candidate_only': None,
+                    'model_available': None,
+                    'runtime_backend': None,
+                }
+                final_message = '训练完成，正在刷新模型状态...'
                 try:
                     from src.multimodal_model import get_multimodal_predictor
                     multimodal_predictor = get_multimodal_predictor()
                     model_info = multimodal_predictor.get_model_info()
                     MULTIMODAL_MODEL_AVAILABLE = model_info.get('available', False)
+                    replaced = bool(model_info.get('production_model_replaced', True))
+                    candidate_only = bool(model_info.get('candidate_only', not replaced))
+                    model_available = bool(model_info.get('available', False))
+                    runtime_backend = model_info.get('runtime_backend') or model_info.get('backend') or 'unknown'
+                    train_result = {
+                        'production_model_replaced': replaced,
+                        'candidate_only': candidate_only,
+                        'model_available': model_available,
+                        'runtime_backend': runtime_backend,
+                    }
+                    if replaced:
+                        final_message = '训练完成，线上模型已更新'
+                    elif model_available:
+                        final_message = '训练完成，新模型未超过基线，已保存候选模型（继续使用当前线上模型）'
+                    else:
+                        final_message = '训练完成，新模型未超过基线且当前无可用线上模型，请先检查数据集质量评估'
                     logger.info("✓ 模型重新加载成功")
                 except Exception as e:
                     logger.error(f"模型重新加载失败: {e}")
+                    train_result = {
+                        'production_model_replaced': None,
+                        'candidate_only': None,
+                        'model_available': bool(MULTIMODAL_MODEL_AVAILABLE),
+                        'runtime_backend': 'unknown',
+                    }
+                    final_message = f'训练完成，但模型状态刷新失败: {str(e)}'
+
+                with training_lock:
+                    training_status['progress'] = 100
+                    training_status['message'] = final_message
+                    training_status['end_time'] = datetime.now().isoformat()
+                    training_status['is_training'] = False
+                    training_status['current_epoch'] = int(training_status.get('total_epochs') or epochs)
+                    training_status['result'] = train_result
             else:
                 raise Exception(f"训练脚本返回错误码: {return_code}")
                 
@@ -913,6 +1036,7 @@ def train_model():
                 training_status['error'] = str(e)
                 training_status['message'] = f'训练失败: {str(e)}'
                 training_status['end_time'] = datetime.now().isoformat()
+                training_status['result'] = None
     
     thread = threading.Thread(target=run_training)
     thread.daemon = True
@@ -925,7 +1049,6 @@ def train_model():
             'stocks': stocks,
             'days': days,
             'epochs': epochs,
-            'model_tier': model_tier,
             'dataset_path': dataset_path,
             'market_path': market_path,
             'news_raw_path': news_raw_path
@@ -1653,7 +1776,12 @@ def start_news_sync():
             }), 400
 
         params = request.json if request.json else {}
-        limit_per_source = max(50, min(int(params.get('limit_per_source', 300)), 2000))
+        limit_per_source = _safe_int_param(params.get('limit_per_source'), default=300, min_value=50, max_value=2000)
+        max_news_age_hours = params.get('max_news_age_hours', None)
+        if max_news_age_hours in ['', '0', 0, 0.0, 'none', 'null']:
+            max_news_age_hours = None
+        elif max_news_age_hours is not None:
+            max_news_age_hours = _safe_int_param(max_news_age_hours, default=72, min_value=1, max_value=24 * 90)
         requested_sources = params.get('sources')
         default_sources = ['eastmoney', 'sina', 'tencent']
         if isinstance(requested_sources, list) and requested_sources:
@@ -1675,7 +1803,8 @@ def start_news_sync():
             'detail': None,
             'params': {
                 'sources': sources,
-                'limit_per_source': limit_per_source
+                'limit_per_source': limit_per_source,
+                'max_news_age_hours': max_news_age_hours,
             }
         }
 
@@ -1717,7 +1846,8 @@ def start_news_sync():
                         stock_code=None,
                         limit=limit_per_source,
                         use_cache=False,
-                        source=source
+                        source=source,
+                        max_news_age_hours=max_news_age_hours,
                     )
                 except Exception as source_error:
                     logger.warning(f"同步新闻源 {source} 失败: {source_error}")
@@ -1738,24 +1868,8 @@ def start_news_sync():
                     }
                 )
 
-            deduped = []
-            seen = set()
-            for item in all_news_items:
-                title = str(item.get('title', '')).strip()
-                publish_time = str(item.get('publish_time', '')).strip()
-                source_name = str(item.get('source', '')).strip()
-                news_id = str(item.get('news_id', '')).strip()
-                key = news_id or f'{title}|{publish_time}|{source_name}'
-                if not key or key in seen:
-                    continue
-                seen.add(key)
-                deduped.append(item)
-
-            deduped.sort(key=lambda x: str(x.get('publish_time', '')), reverse=True)
-
-            cache_file = os.path.join(crawler.cache_dir, 'news_all.json')
-            with open(cache_file, 'w', encoding='utf-8') as f:
-                json.dump(deduped, f, ensure_ascii=False, indent=2)
+            deduped = crawler.deduplicate_news(all_news_items)
+            cache_file = crawler.save_news_cache(deduped, stock_code=None, source='all')
 
             statistics = crawler.get_news_statistics(deduped)
             result = {
@@ -1763,6 +1877,8 @@ def start_news_sync():
                 'source_counts': source_counts,
                 'total_raw': len(all_news_items),
                 'total_unique': len(deduped),
+                'dedup_removed': max(len(all_news_items) - len(deduped), 0),
+                'max_news_age_hours': max_news_age_hours,
                 'cache_file': cache_file,
                 'statistics': statistics,
                 'synced_at': datetime.now().isoformat(),
@@ -1779,6 +1895,7 @@ def start_news_sync():
                     'source_total': total_sources,
                     'source_counts': source_counts,
                     'total_unique': len(deduped),
+                    'max_news_age_hours': max_news_age_hours,
                 }
         except Exception as e:
             logger.error(f"全源新闻同步失败: {e}")
@@ -1797,7 +1914,8 @@ def start_news_sync():
         'message': '全源新闻同步任务已启动，请通过 /api/system/news-sync/status 查看进度',
         'params': {
             'sources': sources,
-            'limit_per_source': limit_per_source
+            'limit_per_source': limit_per_source,
+            'max_news_age_hours': max_news_age_hours,
         }
     })
 
@@ -1867,7 +1985,8 @@ def predict_multimodal(stock_code):
     {
         "days": 100,        # 历史数据天数
         "use_news": true,   # 是否使用新闻
-        "use_relevance": true  # 是否使用相关性
+        "use_relevance": true,  # 是否使用相关性
+        "max_news_age_hours": 72  # 新闻时效窗口（小时，None/<=0 表示不过滤）
     }
     """
     try:
@@ -1877,9 +1996,14 @@ def predict_multimodal(stock_code):
         from src.multimodal_model import get_multimodal_predictor
         
         params = request.json or {}
-        days = params.get('days', 100)
-        use_news = params.get('use_news', True)
-        use_relevance = params.get('use_relevance', True)
+        days = _safe_int_param(params.get('days'), default=100, min_value=60, max_value=600)
+        use_news = _parse_bool_param(params.get('use_news', True), True)
+        use_relevance = _parse_bool_param(params.get('use_relevance', True), True)
+        max_news_age_hours = params.get('max_news_age_hours', 72)
+        if max_news_age_hours in ['', '0', 0, 0.0, 'none', 'null']:
+            max_news_age_hours = None
+        else:
+            max_news_age_hours = _safe_int_param(max_news_age_hours, default=72, min_value=1, max_value=24 * 90)
         
         # 获取K线数据
         df = data_manager.get_stock_kline(stock_code, days=days)
@@ -1896,7 +2020,12 @@ def predict_multimodal(stock_code):
         if use_news:
             try:
                 crawler = get_news_crawler()
-                news_list = crawler.get_news(stock_code=stock_code, limit=20)
+                news_list = crawler.get_news(
+                    stock_code=stock_code,
+                    limit=20,
+                    source='all',
+                    max_news_age_hours=max_news_age_hours,
+                )
                 
                 analyzer = get_news_impact_analyzer()
                 sector_impact = analyzer.get_sector_impact_vector(news_list)
@@ -1946,38 +2075,57 @@ def predict_multimodal(stock_code):
 @app.route('/api/predict/batch', methods=['POST'])
 def predict_batch():
     """
-    批量预测 - 使用多模态模型预测所有股票
+    股票推荐 - 使用当前模型推荐全市场候选股票
     
     请求参数:
     {
-        "top_n": 20,            # 返回前N只股票
-        "kline_days": 120,      # K线历史窗口（最小60）
-        "news_limit": 20,       # 每只股票最多关联新闻条数
+        "top_n": 30,            # 返回前N只股票（模型优化默认）
+        "kline_days": 240,      # K线历史窗口（最小60，模型优化默认）
+        "news_limit": 30,       # 每只股票最多关联新闻条数（模型优化默认）
+        "max_news_age_hours": 72,  # 新闻时效窗口（小时，None/<=0 表示不过滤）
         "use_news": true,       # 是否融合新闻情感/领域影响
         "use_relevance": true,  # 是否融合相关性矩阵
-        "min_price": 0,         # 最低价格过滤
-        "max_price": 10000      # 最高价格过滤
+        "min_price": 2,         # 最低价格过滤（模型优化默认）
+        "max_price": 300        # 最高价格过滤（模型优化默认）
     }
     """
     try:
         params = request.json if request.json else {}
 
-        def parse_bool(value, default=True):
-            if value is None:
-                return default
-            if isinstance(value, bool):
-                return value
-            if isinstance(value, str):
-                return value.strip().lower() in {'1', 'true', 'yes', 'y', 'on'}
-            return bool(value)
+        from src.multimodal_model import get_multimodal_predictor
+        from src.news_crawler import get_news_crawler
+        from src.news_impact_analyzer import get_news_impact_analyzer
+        from src.relevance_graph import get_relevance_graph
 
-        top_n = max(1, min(int(params.get('top_n', 20)), 200))
-        kline_days = max(60, min(int(params.get('kline_days', 120)), 600))
-        news_limit = max(1, min(int(params.get('news_limit', 20)), 100))
-        use_news = parse_bool(params.get('use_news', True), True)
-        use_relevance = parse_bool(params.get('use_relevance', True), True)
-        min_price = float(params.get('min_price', 0))
-        max_price = float(params.get('max_price', 10000))
+        predictor = get_multimodal_predictor()
+        model_info = {}
+        try:
+            model_info = predictor.get_model_info() or {}
+        except Exception:
+            model_info = {}
+
+        runtime_backend = str(model_info.get('runtime_backend', '')).lower()
+        model_ready = bool(model_info.get('available', False))
+        optimized_profile = runtime_backend == 'tensorflow' and model_ready
+
+        default_top_n = 30 if optimized_profile else 20
+        default_kline_days = 240 if optimized_profile else 120
+        default_news_limit = 30 if optimized_profile else 20
+        default_min_price = 2.0 if optimized_profile else 0.0
+        default_max_price = 300.0 if optimized_profile else 1000.0
+
+        top_n = _safe_int_param(params.get('top_n'), default=default_top_n, min_value=1, max_value=200)
+        kline_days = _safe_int_param(params.get('kline_days'), default=default_kline_days, min_value=60, max_value=600)
+        news_limit = _safe_int_param(params.get('news_limit'), default=default_news_limit, min_value=1, max_value=100)
+        max_news_age_hours = params.get('max_news_age_hours', 72)
+        if max_news_age_hours in ['', '0', 0, 0.0, 'none', 'null']:
+            max_news_age_hours = None
+        else:
+            max_news_age_hours = _safe_int_param(max_news_age_hours, default=72, min_value=1, max_value=24 * 90)
+        use_news = _parse_bool_param(params.get('use_news', True), True)
+        use_relevance = _parse_bool_param(params.get('use_relevance', True), True)
+        min_price = _safe_float_param(params.get('min_price'), default=default_min_price, min_value=0.0, max_value=100000.0)
+        max_price = _safe_float_param(params.get('max_price'), default=default_max_price, min_value=0.0, max_value=100000.0)
         if max_price < min_price:
             return jsonify({
                 'success': False,
@@ -1985,11 +2133,12 @@ def predict_batch():
             }), 400
 
         logger.info(
-            "开始批量预测，stock_scope=all_cache, top_n=%s, kline_days=%s, use_news=%s, use_relevance=%s",
+            "开始股票推荐，stock_scope=all_cache, top_n=%s, kline_days=%s, use_news=%s, use_relevance=%s, max_news_age_hours=%s",
             top_n,
             kline_days,
             use_news,
             use_relevance,
+            max_news_age_hours,
         )
         
         # 获取股票列表
@@ -2001,12 +2150,6 @@ def predict_batch():
                 'message': '无法获取股票列表'
             }), 400
         
-        from src.multimodal_model import get_multimodal_predictor
-        from src.news_crawler import get_news_crawler
-        from src.news_impact_analyzer import get_news_impact_analyzer
-        from src.relevance_graph import get_relevance_graph
-        
-        predictor = get_multimodal_predictor()
         crawler = get_news_crawler()
         analyzer = get_news_impact_analyzer()
 
@@ -2037,30 +2180,19 @@ def predict_batch():
                         limit=max(200, min(1200, news_limit * 12)),
                         source='all',
                         use_cache=True,
+                        max_news_age_hours=max_news_age_hours,
                     )
                 else:
-                    logger.warning("新闻爬虫不可用，批量预测将降级为无新闻特征")
+                    logger.warning("新闻爬虫不可用，股票推荐将降级为无新闻特征")
             except Exception as e:
                 logger.warning(f"获取全量新闻失败，将降级为无新闻特征: {e}")
                 global_news = []
 
-        prepared_news = []
-        for item in global_news:
-            title = str(item.get('title', '') or '')
-            content = str(item.get('content', '') or '')
-            prepared_news.append((item, f"{title} {content}"))
-
         stock_news_map = {}
-        if use_news and prepared_news:
+        if use_news and global_news:
             for _, stock in stock_list.iterrows():
                 code = str(stock.get('code', '')).zfill(6)
-                name = str(stock.get('name', '') or '').strip()
-                matches = []
-                for news_item, text in prepared_news:
-                    if code in text or (name and name in text):
-                        matches.append(news_item)
-                        if len(matches) >= news_limit:
-                            break
+                matches = crawler.filter_news_by_stock(global_news, code, limit=news_limit)
                 stock_news_map[code] = matches
         
         predictions = []
@@ -2132,7 +2264,7 @@ def predict_batch():
         up_count = sum(1 for p in predictions if p['prediction'] == 1)
         down_count = len(predictions) - up_count
         
-        logger.info(f"批量预测完成，分析 {analyzed_count} 只股票，上涨{up_count}只，下跌{down_count}只")
+        logger.info(f"股票推荐完成，分析 {analyzed_count} 只股票，上涨{up_count}只，下跌{down_count}只")
         
         return jsonify({
             'success': True,
@@ -2149,20 +2281,24 @@ def predict_batch():
                     'top_n': top_n,
                     'kline_days': kline_days,
                     'news_limit': news_limit,
+                    'max_news_age_hours': max_news_age_hours,
                     'use_news': use_news,
                     'use_relevance': use_relevance,
                     'min_price': min_price,
                     'max_price': max_price,
+                    'optimized_profile': optimized_profile,
                 },
                 'model_info': {
                     'model_name': 'multimodal_stock_predictor',
-                    'predict_horizon_days': 5
+                    'predict_horizon_days': 5,
+                    'runtime_backend': runtime_backend or 'unknown',
+                    'model_available': model_ready,
                 }
             }
         })
         
     except Exception as e:
-        logger.error(f"批量预测失败: {e}")
+        logger.error(f"股票推荐失败: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({
@@ -2179,6 +2315,11 @@ def get_news():
         stock_code = request.args.get('stock_code')
         limit = request.args.get('limit', 50, type=int)
         source = request.args.get('source', 'eastmoney')
+        max_age_raw = request.args.get('max_age_hours', default='72')
+        if max_age_raw in ['', '0', 'none', 'null']:
+            max_news_age_hours = None
+        else:
+            max_news_age_hours = _safe_int_param(max_age_raw, default=72, min_value=1, max_value=24 * 90)
         
         from src.news_crawler import get_news_crawler
         crawler = get_news_crawler()
@@ -2189,14 +2330,20 @@ def get_news():
                 'message': '新闻爬虫不可用，请安装akshare'
             }), 400
         
-        news_list = crawler.get_news(stock_code=stock_code, limit=limit, source=source)
+        news_list = crawler.get_news(
+            stock_code=stock_code,
+            limit=limit,
+            source=source,
+            max_news_age_hours=max_news_age_hours,
+        )
         stats = crawler.get_news_statistics(news_list)
         
         return jsonify({
             'success': True,
             'data': {
                 'news': news_list,
-                'statistics': stats
+                'statistics': stats,
+                'max_news_age_hours': max_news_age_hours,
             }
         })
     except Exception as e:

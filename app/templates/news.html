@@ -27,6 +27,11 @@
                 <input type="number" id="news-limit" value="30" min="10" max="100"
                        style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
             </div>
+            <div style="width: 140px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 500;">时效(小时)</label>
+                <input type="number" id="news-max-age-hours" value="72" min="1" max="2160"
+                       style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
             <button onclick="loadNews()" 
                     style="padding: 10px 25px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">
                 🔍 查询
@@ -125,14 +130,25 @@ const NEWS_FEATURE_LABEL_MAP = {
     positive_ratio: '正面占比',
     negative_ratio: '负面占比',
     source_count: '来源数量',
-    news_impact_total: '新闻影响总分'
+    source_entropy: '来源熵',
+    news_impact_total: '新闻影响总分',
+    news_impact_abs_total: '新闻绝对影响总分',
+    news_sentiment_abs_sum: '情绪绝对值总和',
+    event_shock_flag: '事件冲击标记',
+    sentiment_ewm_3d: '情绪3日指数均值',
+    sentiment_ewm_5d: '情绪5日指数均值',
+    importance_ewm_3d: '重要性3日指数均值',
+    importance_ewm_5d: '重要性5日指数均值',
+    news_count_ewm_5d: '新闻数量5日指数均值',
+    impact_ewm_5d: '影响总分5日指数均值'
 };
 
 const NEWS_FEATURE_PERCENT_KEYS = new Set([
     'avg_importance',
     'max_importance',
     'positive_ratio',
-    'negative_ratio'
+    'negative_ratio',
+    'source_entropy'
 ]);
 
 const NEWS_SOURCE_LABEL_MAP = {
@@ -146,7 +162,10 @@ const NEWS_SOURCE_LABEL_MAP = {
 async function loadNews() {
     const stockCode = document.getElementById('stock-code').value.trim();
     const newsSource = document.getElementById('news-source').value;
-    const limit = document.getElementById('news-limit').value;
+    const limit = Number.parseInt(document.getElementById('news-limit').value || '30', 10);
+    const maxAgeInput = Number.parseInt(document.getElementById('news-max-age-hours').value || '72', 10);
+    const maxAgeHours = Number.isFinite(maxAgeInput) ? Math.min(2160, Math.max(1, maxAgeInput)) : 72;
+    document.getElementById('news-max-age-hours').value = String(maxAgeHours);
     
     currentStockCode = stockCode;
     
@@ -154,7 +173,7 @@ async function loadNews() {
     newsListDiv.innerHTML = '<div style="text-align: center; padding: 40px;">⏳ 加载中...</div>';
     
     try {
-        let url = `/api/news?limit=${limit}&source=${newsSource}`;
+        let url = `/api/news?limit=${Number.isFinite(limit) ? limit : 30}&source=${newsSource}&max_age_hours=${maxAgeHours}`;
         if (stockCode) {
             url += `&stock_code=${stockCode}`;
         }
@@ -399,7 +418,10 @@ async function queryNewsDailyFeatures() {
             'positive_ratio',
             'negative_ratio',
             'source_count',
-            'news_impact_total'
+            'source_entropy',
+            'news_impact_total',
+            'news_impact_abs_total',
+            'event_shock_flag'
         ];
         const features = data.features || {};
         const cards = importantKeys
@@ -455,6 +477,9 @@ function formatNewsFeatureValue(key, value) {
 
     if (NEWS_FEATURE_PERCENT_KEYS.has(key)) {
         return `${(value * 100).toFixed(2)}%`;
+    }
+    if (key === 'event_shock_flag') {
+        return Number(value) >= 0.5 ? '是' : '否';
     }
 
     return Number(value).toFixed(4);

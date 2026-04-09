@@ -61,10 +61,31 @@ NEWS_BASE_COLUMNS = [
     "positive_ratio",
     "negative_ratio",
     "source_count",
+    "source_entropy",
     "news_impact_total",
     "news_impact_abs_total",
     "news_sentiment_abs_sum",
+    "event_shock_flag",
+    "sentiment_ewm_3d",
+    "sentiment_ewm_5d",
+    "importance_ewm_3d",
+    "importance_ewm_5d",
+    "news_count_ewm_5d",
+    "impact_ewm_5d",
 ]
+
+
+def _dedupe_columns(columns: Iterable[str]) -> List[str]:
+    """按首次出现顺序去重列名。"""
+    seen = set()
+    unique_cols: List[str] = []
+    for col in columns:
+        key = str(col)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_cols.append(key)
+    return unique_cols
 
 
 def _resolve_dataset_file(path: Optional[str], name: str) -> str:
@@ -111,6 +132,7 @@ def _detect_feature_columns(df: pd.DataFrame) -> Tuple[List[str], List[str], Lis
 
     event_cols = sorted(col for col in numeric_cols if col.startswith("event_"))
     news_cols.extend(event_cols)
+    news_cols = _dedupe_columns(news_cols)
 
     sector_cols = sorted(col for col in numeric_cols if col.startswith("sector_"))
 
@@ -231,7 +253,7 @@ def _build_news_lookup(news_raw_df: pd.DataFrame, calendar_map: Dict[str, List[p
 
 
 def _extract_feature_array(df: pd.DataFrame, cols: Iterable[str]) -> np.ndarray:
-    selected = list(cols)
+    selected = _dedupe_columns(cols)
     if not selected:
         return np.zeros((len(df), 0), dtype=float)
 
@@ -269,6 +291,14 @@ def prepare_training_data_from_dataset(
     model_df["label_up_5d"] = pd.to_numeric(model_df["label_up_5d"], errors="coerce")
     model_df = model_df.dropna(subset=["label_up_5d"])
     model_df["label_up_5d"] = model_df["label_up_5d"].astype(int)
+
+    # 回归目标：未来收益率（十进制），用于真实收益回归头
+    has_return_target = "future_ret_5d" in model_df.columns
+    if has_return_target:
+        model_df["future_ret_5d"] = pd.to_numeric(model_df["future_ret_5d"], errors="coerce")
+    else:
+        logger.warning("model_dataset 缺少 future_ret_5d，回归头将使用标签近似值回退")
+        model_df["future_ret_5d"] = np.where(model_df["label_up_5d"] > 0, 0.01, -0.01)
 
     if model_df.empty:
         raise ValueError("过滤后 model_dataset 为空，无法训练")
@@ -322,6 +352,7 @@ def prepare_training_data_from_dataset(
         "relevance_features": _extract_feature_array(model_df, relevance_cols),
         "text_features": text_features,
         "labels": model_df["label_up_5d"].to_numpy(dtype=int),
+        "return_targets": model_df["future_ret_5d"].fillna(0.0).to_numpy(dtype=float),
     }
 
     positive = int(training_data["labels"].sum())

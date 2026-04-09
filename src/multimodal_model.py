@@ -13,7 +13,7 @@ import os
 import json
 import logging
 import hashlib
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Tuple
 from datetime import datetime
 
 import numpy as np
@@ -192,20 +192,37 @@ class MultiModalPredictor:
             x = layers.BatchNormalization()(x)
             x = layers.Dropout(layer_dropout)(x)
 
-        output = layers.Dense(1, activation="sigmoid", name="prediction")(x)
+        classification_output = layers.Dense(1, activation="sigmoid", name="prediction")(x)
+
+        # 真实收益回归头（目标为 future_ret_5d，十进制收益率）
+        return_hidden = layers.Dense(32, activation="relu")(x)
+        return_output = layers.Dense(1, activation="linear", name="return_pred")(return_hidden)
 
         model = models.Model(
             inputs=[news_input, sector_input, tech_input, relevance_input, text_input],
-            outputs=output,
+            outputs=[classification_output, return_output],
         )
 
         model.compile(
             optimizer=Adam(learning_rate=learning_rate),
-            loss="binary_crossentropy",
-            metrics=[
-                keras.metrics.BinaryAccuracy(name="accuracy"),
-                keras.metrics.AUC(name="auc"),
-            ],
+            loss={
+                "prediction": "binary_crossentropy",
+                "return_pred": keras.losses.Huber(delta=0.02),
+            },
+            loss_weights={
+                "prediction": 1.0,
+                "return_pred": 0.35,
+            },
+            metrics={
+                "prediction": [
+                    keras.metrics.BinaryAccuracy(name="accuracy"),
+                    keras.metrics.AUC(name="auc"),
+                ],
+                "return_pred": [
+                    keras.metrics.MeanAbsoluteError(name="mae"),
+                    keras.metrics.MeanSquaredError(name="mse"),
+                ],
+            },
         )
         return model
 
@@ -255,6 +272,21 @@ class MultiModalPredictor:
         else:
             text = self._normalize_2d(text_raw, self.text_feature_dim)
 
+        return_targets_raw = training_data.get("return_targets")
+        if return_targets_raw is None:
+            logger.warning("训练数据缺少 return_targets，回归头将使用标签近似值回退")
+            return_targets = np.where(labels > 0, 0.01, -0.01).astype(float)
+        else:
+            return_targets = np.asarray(return_targets_raw, dtype=float).reshape(-1)
+            if len(return_targets) != n_samples:
+                raise ValueError(
+                    f"return_targets 样本数与标签不一致: {len(return_targets)} != {n_samples}"
+                )
+
+        # 过滤异常值并裁剪至合理区间（future_ret_5d）
+        return_targets = np.nan_to_num(return_targets, nan=0.0, posinf=0.0, neginf=0.0)
+        return_targets = np.clip(return_targets, -0.20, 0.20)
+
         matrices = {
             "news": news,
             "sector": sector,
@@ -262,6 +294,7 @@ class MultiModalPredictor:
             "relevance": relevance,
             "text": text,
             "labels": labels,
+            "return_targets": return_targets.reshape(-1, 1),
         }
 
         for name, matrix in matrices.items():
@@ -332,9 +365,15 @@ class MultiModalPredictor:
             comparison["message"] = "未找到可用基线报告，默认允许替换模型"
             return comparison
 
-        # 优先 AUC，其次准确率
+        # 优先使用时间顺序 holdout(test) 指标，再回退到验证集指标
         metric_candidates = [
+            ("test_prediction_auc", "auc"),
+            ("test_auc", "auc"),
+            ("test_prediction_accuracy", "accuracy"),
+            ("test_accuracy", "accuracy"),
+            ("val_prediction_auc", "auc"),
             ("val_auc", "auc"),
+            ("val_prediction_accuracy", "accuracy"),
             ("val_accuracy", "accuracy"),
         ]
 
@@ -387,8 +426,40 @@ class MultiModalPredictor:
     ) -> Dict[str, Any]:
         """使用 TensorFlow 训练多模态模型。"""
         model = self._build_model(model_tier=model_tier)
-        X_train = [arrays["news"], arrays["sector"], arrays["tech"], arrays["relevance"], arrays["text"]]
-        y_train = arrays["labels"]
+        X_all = [arrays["news"], arrays["sector"], arrays["tech"], arrays["relevance"], arrays["text"]]
+        y_all_cls = arrays["labels"].astype(float).reshape(-1, 1)
+        y_all_ret = arrays["return_targets"].astype(float).reshape(-1, 1)
+        total_samples = int(len(y_all_cls))
+
+        if total_samples < 32:
+            raise ValueError("样本量过少（<32），无法稳定进行时间顺序 train/val/test 切分")
+
+        # 时间顺序切分，避免随机切分造成时序泄漏
+        val_size = max(1, int(total_samples * 0.15))
+        test_size = max(1, int(total_samples * 0.15))
+        train_size = total_samples - val_size - test_size
+
+        if train_size < 16:
+            val_size = max(1, int(total_samples * 0.1))
+            test_size = max(1, int(total_samples * 0.1))
+            train_size = total_samples - val_size - test_size
+
+        if train_size < 16:
+            raise ValueError("样本分割后训练集过小，无法继续训练")
+
+        train_end = train_size
+        val_end = train_size + val_size
+
+        X_train = [matrix[:train_end] for matrix in X_all]
+        X_val = [matrix[train_end:val_end] for matrix in X_all]
+        X_test = [matrix[val_end:] for matrix in X_all]
+
+        y_train_cls = y_all_cls[:train_end]
+        y_train_ret = y_all_ret[:train_end]
+        y_val_cls = y_all_cls[train_end:val_end]
+        y_val_ret = y_all_ret[train_end:val_end]
+        y_test_cls = y_all_cls[val_end:]
+        y_test_ret = y_all_ret[val_end:]
 
         callback_list = [
             callbacks.EarlyStopping(
@@ -406,22 +477,79 @@ class MultiModalPredictor:
 
         history = model.fit(
             X_train,
-            y_train,
+            {
+                "prediction": y_train_cls,
+                "return_pred": y_train_ret,
+            },
             epochs=max(5, int(epochs)),
             batch_size=max(8, int(batch_size)),
-            validation_split=0.2,
+            validation_data=(
+                X_val,
+                {
+                    "prediction": y_val_cls,
+                    "return_pred": y_val_ret,
+                },
+            ),
             callbacks=callback_list,
             verbose=1,
+            shuffle=False,
         )
 
+        def history_last(candidates: List[str], default: float) -> float:
+            for key in candidates:
+                values = history.history.get(key)
+                if values:
+                    return self._safe_float(values[-1], default)
+            return default
+
+        test_metrics_raw = model.evaluate(
+            X_test,
+            {
+                "prediction": y_test_cls,
+                "return_pred": y_test_ret,
+            },
+            verbose=0,
+            return_dict=True,
+        )
+
+        def eval_last(candidates: List[str], default: float) -> float:
+            for key in candidates:
+                if key in test_metrics_raw:
+                    return self._safe_float(test_metrics_raw.get(key), default)
+            return default
+
         final_metrics = {
-            "loss": self._safe_float(history.history.get("loss", [None])[-1], 0.0),
-            "accuracy": self._safe_float(history.history.get("accuracy", [None])[-1], 0.0),
-            "auc": self._safe_float(history.history.get("auc", [None])[-1], 0.5),
-            "val_loss": self._safe_float(history.history.get("val_loss", [None])[-1], 0.0),
-            "val_accuracy": self._safe_float(history.history.get("val_accuracy", [None])[-1], 0.0),
-            "val_auc": self._safe_float(history.history.get("val_auc", [None])[-1], 0.5),
+            "loss": history_last(["loss"], 0.0),
+            "prediction_loss": history_last(["prediction_loss"], 0.0),
+            "return_loss": history_last(["return_pred_loss"], 0.0),
+            "accuracy": history_last(["prediction_accuracy", "accuracy"], 0.0),
+            "auc": history_last(["prediction_auc", "auc"], 0.5),
+            "val_loss": history_last(["val_loss"], 0.0),
+            "val_prediction_loss": history_last(["val_prediction_loss"], 0.0),
+            "val_return_loss": history_last(["val_return_pred_loss"], 0.0),
+            "val_accuracy": history_last(["val_prediction_accuracy", "val_accuracy"], 0.0),
+            "val_auc": history_last(["val_prediction_auc", "val_auc"], 0.5),
+            "return_mae": history_last(["return_pred_mae", "mae"], 0.0),
+            "return_mse": history_last(["return_pred_mse", "mse"], 0.0),
+            "val_return_mae": history_last(["val_return_pred_mae", "val_mae"], 0.0),
+            "val_return_mse": history_last(["val_return_pred_mse", "val_mse"], 0.0),
+            "test_loss": eval_last(["loss"], 0.0),
+            "test_prediction_loss": eval_last(["prediction_loss"], 0.0),
+            "test_return_loss": eval_last(["return_pred_loss"], 0.0),
+            "test_accuracy": eval_last(["prediction_accuracy", "accuracy"], 0.0),
+            "test_auc": eval_last(["prediction_auc", "auc"], 0.5),
+            "test_return_mae": eval_last(["return_pred_mae", "mae"], 0.0),
+            "test_return_mse": eval_last(["return_pred_mse", "mse"], 0.0),
         }
+        final_metrics["return_rmse"] = self._safe_float(np.sqrt(max(final_metrics["return_mse"], 0.0)), 0.0)
+        final_metrics["val_return_rmse"] = self._safe_float(
+            np.sqrt(max(final_metrics["val_return_mse"], 0.0)),
+            0.0,
+        )
+        final_metrics["test_return_rmse"] = self._safe_float(
+            np.sqrt(max(final_metrics["test_return_mse"], 0.0)),
+            0.0,
+        )
 
         comparison = self._compare_with_baseline(final_metrics)
         should_replace = self._should_replace_model(comparison)
@@ -439,7 +567,13 @@ class MultiModalPredictor:
             "created_at": datetime.now().isoformat(),
             "backend": "tensorflow",
             "model_tier": model_tier,
-            "training_samples": int(len(y_train)),
+            "training_samples": total_samples,
+            "data_split": {
+                "strategy": "chronological",
+                "train_samples": int(train_size),
+                "val_samples": int(val_size),
+                "test_samples": int(total_samples - val_end),
+            },
             "epochs_trained": int(len(history.history.get("loss", []))),
             "final_metrics": final_metrics,
             "feature_dims": {
@@ -453,6 +587,11 @@ class MultiModalPredictor:
                 "type": "native_hashing" if self.text_hash_dim > 0 else "none",
                 "stat_dim": self.text_stat_dim,
                 "hash_dim": self.text_hash_dim,
+            },
+            "targets": {
+                "classification": "label_up_5d",
+                "regression": "future_ret_5d(decimal)",
+                "regression_clip": [-0.20, 0.20],
             },
             "baseline_comparison": comparison,
             "production_model_replaced": should_replace,
@@ -515,6 +654,7 @@ class MultiModalPredictor:
                 - relevance_features: (n_samples, relevance_dim)
                 - text_features: (n_samples, text_feature_dim)，可选
                 - labels: (n_samples,)
+                - return_targets: (n_samples,) 未来收益率（十进制），可选
             epochs: 训练轮数
             batch_size: 批量大小
             model_tier: 兼容字段，当前固定 heavy
@@ -831,6 +971,7 @@ class MultiModalPredictor:
             text_features = np.zeros((news_features.shape[0], self.text_feature_dim), dtype=float)
         text_features = self._normalize_2d(text_features, self.text_feature_dim)
 
+        predicted_return_decimal: Optional[float] = None
         if TENSORFLOW_AVAILABLE and self.model is not None:
             input_count = len(getattr(self.model, "inputs", []))
             if input_count >= 5:
@@ -845,10 +986,16 @@ class MultiModalPredictor:
                 # 兼容旧模型（4路输入）
                 model_inputs = [news_features, sector_features, tech_features, relevance_features]
 
-            prob = float(self.model.predict(model_inputs, verbose=0)[0][0])
+            model_output = self.model.predict(model_inputs, verbose=0)
+            if isinstance(model_output, (list, tuple)):
+                prob = float(np.asarray(model_output[0]).reshape(-1)[0])
+                if len(model_output) > 1:
+                    predicted_return_decimal = float(np.asarray(model_output[1]).reshape(-1)[0])
+            else:
+                prob = float(np.asarray(model_output).reshape(-1)[0])
             backend = "tensorflow"
         else:
-            prob = self._simple_predict(
+            prob, predicted_return_decimal = self._simple_predict(
                 news_features,
                 sector_features,
                 tech_features,
@@ -860,7 +1007,16 @@ class MultiModalPredictor:
         if np.isnan(prob) or np.isinf(prob):
             prob = 0.5
 
-        prediction = 1 if prob > 0.5 else 0
+        if predicted_return_decimal is not None:
+            if np.isnan(predicted_return_decimal) or np.isinf(predicted_return_decimal):
+                predicted_return_decimal = None
+            else:
+                predicted_return_decimal = float(np.clip(predicted_return_decimal, -0.20, 0.20))
+
+        if predicted_return_decimal is not None:
+            prediction = 1 if predicted_return_decimal >= 0 else 0
+        else:
+            prediction = 1 if prob > 0.5 else 0
         confidence = prob if prediction == 1 else 1 - prob
 
         return {
@@ -869,6 +1025,11 @@ class MultiModalPredictor:
             "prediction_text": "上涨" if prediction == 1 else "下跌",
             "probability": round(float(prob), 4),
             "confidence": round(float(confidence), 4),
+            "predicted_return_decimal": (
+                round(float(predicted_return_decimal), 6)
+                if predicted_return_decimal is not None
+                else None
+            ),
             "model_type": "multimodal",
             "backend": backend,
             "features_used": {
@@ -887,7 +1048,7 @@ class MultiModalPredictor:
         tech_features: np.ndarray,
         relevance_features: np.ndarray,
         text_features: np.ndarray,
-    ) -> float:
+    ) -> Tuple[float, float]:
         """规则版预测（无训练模型时使用）"""
         # 新闻情感权重 (-1 到 1)
         news_score = float(news_features[0, 0]) * 0.5 + float(news_features[0, 6]) * 0.5
@@ -961,7 +1122,8 @@ class MultiModalPredictor:
             combined = 0.0
 
         prob = 1 / (1 + np.exp(-combined * 8))
-        return float(prob)
+        expected_return_decimal = float(np.tanh(combined) * 0.08)
+        return float(prob), expected_return_decimal
 
     def predict_stock(
         self,
@@ -1047,16 +1209,26 @@ class MultiModalPredictor:
             }
         )
 
-        confidence = prediction["confidence"]
-        if prediction["prediction"] == 1:
-            expected_return = confidence * 3
-            predicted_price = latest_price * (1 + expected_return / 100)
+        expected_return_source = "regression_head"
+        predicted_return_decimal = prediction.get("predicted_return_decimal")
+        if predicted_return_decimal is not None:
+            expected_return = float(predicted_return_decimal) * 100.0
         else:
-            expected_return = -confidence * 2
-            predicted_price = latest_price * (1 + expected_return / 100)
+            # 兼容旧模型：若无回归头输出，则按概率与波动率估算收益幅度
+            prob = safe_float(prediction.get("probability"), 0.5)
+            vol_20d_pct = abs(safe_float(tech_features[0, 3], 0.0))
+            # vol_20d_pct 来自 20 日波动率（百分比），用于动态收益尺度
+            scale_pct = float(np.clip(vol_20d_pct * 1.8, 0.8, 12.0))
+            direction_strength = float(np.tanh((prob - 0.5) * 3.8))
+            expected_return = direction_strength * scale_pct
+            expected_return_source = "probability_volatility_fallback"
+
+        expected_return = float(np.clip(expected_return, -20.0, 20.0))
+        predicted_price = latest_price * (1 + expected_return / 100.0)
 
         prediction["expected_return"] = round(expected_return, 2)
         prediction["predicted_price"] = round(predicted_price, 2)
+        prediction["expected_return_source"] = expected_return_source
         prediction["success"] = True
 
         return prediction

@@ -391,17 +391,42 @@ class DatasetBuilder:
 
     def _load_news_items(self, stock_code: str, refresh_news: bool) -> List[Dict]:
         """Load cached news items and optionally fetch current items."""
-        cache_file = Path(self.news_crawler.cache_dir) / f"news_{stock_code}.json"
         news_list: List[Dict] = []
 
-        if cache_file.exists():
+        cache_dir = Path(self.news_crawler.cache_dir)
+        cache_candidates = [
+            cache_dir / f"news_{stock_code}_all.json",
+            cache_dir / f"news_{stock_code}.json",  # 兼容旧命名
+        ]
+
+        for cache_file in cache_candidates:
+            if not cache_file.exists():
+                continue
             try:
                 with open(cache_file, "r", encoding="utf-8") as file_obj:
                     payload = json.load(file_obj)
-                    if isinstance(payload, list):
-                        news_list.extend(payload)
+                if isinstance(payload, list):
+                    news_list.extend(payload)
             except Exception as exc:
-                logger.warning("Failed to read cached news for %s: %s", stock_code, exc)
+                logger.warning("Failed to read cached news for %s (%s): %s", stock_code, cache_file, exc)
+
+        if not news_list:
+            global_cache_candidates = [
+                cache_dir / "news_all_all.json",
+                cache_dir / "news_all.json",  # 兼容旧命名
+            ]
+            for cache_file in global_cache_candidates:
+                if not cache_file.exists():
+                    continue
+                try:
+                    with open(cache_file, "r", encoding="utf-8") as file_obj:
+                        payload = json.load(file_obj)
+                    if isinstance(payload, list) and payload:
+                        news_list = self.news_crawler.filter_news_by_stock(payload, stock_code, limit=500)
+                        if news_list:
+                            break
+                except Exception as exc:
+                    logger.warning("Failed to read global news cache for %s (%s): %s", stock_code, cache_file, exc)
 
         if not news_list and refresh_news and self.news_crawler.is_available():
             try:
@@ -409,20 +434,13 @@ class DatasetBuilder:
                     stock_code=stock_code,
                     limit=200,
                     use_cache=False,
+                    source="all",
+                    max_news_age_hours=None,
                 )
             except Exception as exc:
                 logger.warning("Failed to refresh news for %s: %s", stock_code, exc)
 
-        deduped = {}
-        for news in news_list:
-            news_id = str(news.get("news_id", "")).strip()
-            if not news_id:
-                publish_time = str(news.get("publish_time", ""))
-                title = str(news.get("title", ""))
-                news_id = f"{publish_time}:{title}"
-            deduped[news_id] = news
-
-        return list(deduped.values())
+        return self.news_crawler.deduplicate_news(news_list)
 
     def _build_raw_news_frame(self, stock_code: str, news_list: List[Dict]) -> pd.DataFrame:
         """Normalize raw news rows for persistence."""
@@ -474,8 +492,18 @@ class DatasetBuilder:
         rows = []
         for trade_date in calendar:
             rows.append(self._build_daily_news_feature_row(stock_code, trade_date, grouped_news[trade_date]))
+        frame = pd.DataFrame(rows)
+        if frame.empty:
+            return frame
 
-        return pd.DataFrame(rows)
+        frame = frame.sort_values("trade_date").reset_index(drop=True)
+        frame["sentiment_ewm_3d"] = frame["weighted_sentiment"].ewm(span=3, adjust=False, min_periods=1).mean()
+        frame["sentiment_ewm_5d"] = frame["weighted_sentiment"].ewm(span=5, adjust=False, min_periods=1).mean()
+        frame["importance_ewm_3d"] = frame["avg_importance"].ewm(span=3, adjust=False, min_periods=1).mean()
+        frame["importance_ewm_5d"] = frame["avg_importance"].ewm(span=5, adjust=False, min_periods=1).mean()
+        frame["news_count_ewm_5d"] = frame["news_count"].ewm(span=5, adjust=False, min_periods=1).mean()
+        frame["impact_ewm_5d"] = frame["news_impact_total"].ewm(span=5, adjust=False, min_periods=1).mean()
+        return frame
 
     def _build_daily_news_feature_row(
         self,
@@ -495,9 +523,11 @@ class DatasetBuilder:
             "positive_ratio": 0.0,
             "negative_ratio": 0.0,
             "source_count": 0.0,
+            "source_entropy": 0.0,
             "news_impact_total": 0.0,
             "news_impact_abs_total": 0.0,
             "news_sentiment_abs_sum": 0.0,
+            "event_shock_flag": 0.0,
         }
 
         for sector_slug in SECTOR_COLUMN_MAP.values():
@@ -532,6 +562,18 @@ class DatasetBuilder:
             len({str(news.get("source", "")).strip() for news in news_list if str(news.get("source", "")).strip()})
         )
         row["news_sentiment_abs_sum"] = self._safe_float(np.abs(sentiments).sum())
+        source_counter = defaultdict(int)
+        for news in news_list:
+            source_name = str(news.get("source", "")).strip()
+            if source_name:
+                source_counter[source_name] += 1
+        if source_counter:
+            source_probs = np.array(list(source_counter.values()), dtype=float)
+            source_probs = source_probs / max(source_probs.sum(), 1.0)
+            entropy = -float(np.sum(source_probs * np.log(source_probs + 1e-12)))
+            if len(source_probs) > 1:
+                entropy = entropy / float(np.log(len(source_probs)))
+            row["source_entropy"] = self._safe_float(entropy)
 
         sector_scores = defaultdict(float)
         for index, news in enumerate(news_list):
@@ -556,6 +598,12 @@ class DatasetBuilder:
 
         row["news_impact_total"] = self._safe_float(sum(sector_scores.values()))
         row["news_impact_abs_total"] = self._safe_float(sum(abs(value) for value in sector_scores.values()))
+        is_shock = (
+            row["news_count"] >= 8
+            or abs(row["weighted_sentiment"]) >= 0.45
+            or row["news_impact_abs_total"] >= 1.2
+        )
+        row["event_shock_flag"] = 1.0 if is_shock else 0.0
         return row
 
     def _build_static_feature_frame(
@@ -679,9 +727,17 @@ class DatasetBuilder:
                 "positive_ratio",
                 "negative_ratio",
                 "source_count",
+                "source_entropy",
                 "news_impact_total",
                 "news_impact_abs_total",
                 "news_sentiment_abs_sum",
+                "event_shock_flag",
+                "sentiment_ewm_3d",
+                "sentiment_ewm_5d",
+                "importance_ewm_3d",
+                "importance_ewm_5d",
+                "news_count_ewm_5d",
+                "impact_ewm_5d",
             }
         )
 

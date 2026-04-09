@@ -59,11 +59,18 @@
 
 <!-- 预测区域 -->
 <div id="predict-section" class="card" style="display: none; margin-top: 20px;">
-    <h3>🔮 多模态预测</h3>
+    <h3>🤖 当前模型预测</h3>
+    <div id="stock-model-summary" style="margin-bottom: 12px; padding: 10px; border-radius: 6px; background: #f8fafc; color: #475569;">
+        正在读取当前模型信息...
+    </div>
     <div style="display: flex; gap: 15px; margin-bottom: 15px; align-items: flex-end;">
         <div>
-            <label style="display: block; margin-bottom: 5px;">预测天数</label>
-            <input type="number" id="predict-days" value="5" min="1" max="20" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; width: 100px;">
+            <label style="display: block; margin-bottom: 5px;">历史K线天数</label>
+            <input type="number" id="predict-days" value="240" min="60" max="600" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; width: 120px;">
+        </div>
+        <div>
+            <label style="display: block; margin-bottom: 5px;">新闻时效（小时）</label>
+            <input type="number" id="predict-news-age-hours" value="72" min="1" max="2160" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; width: 130px;">
         </div>
         <div style="display: flex; gap: 10px;">
             <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
@@ -74,7 +81,7 @@
             </label>
         </div>
         <button onclick="runPrediction()" style="padding: 8px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">
-            开始预测
+            使用当前模型预测
         </button>
     </div>
     
@@ -88,6 +95,27 @@
 // 全局变量
 let allStocks = [];
 let currentStockCode = '';
+
+async function loadCurrentModelSummary() {
+    const summaryEl = document.getElementById('stock-model-summary');
+    if (!summaryEl) {
+        return;
+    }
+    try {
+        const response = await fetch('/api/model/info');
+        const payload = await response.json();
+        const model = payload.model || {};
+        const ready = !!payload.model_available;
+        if (!ready) {
+            summaryEl.innerHTML = '当前尚未加载可用模型，请先到“模型训练”页面完成训练。';
+            return;
+        }
+        const backend = model.runtime_backend || model.backend || 'unknown';
+        summaryEl.innerHTML = `当前线上模型可用：后端 ${backend}，预测口径为未来 5 个交易日。`;
+    } catch (error) {
+        summaryEl.innerHTML = `读取模型信息失败：${error.message}`;
+    }
+}
 
 // 加载股票列表
 async function loadStockList() {
@@ -359,7 +387,18 @@ async function runPrediction() {
         return;
     }
     
-    const days = parseInt(document.getElementById('days').value);
+    const daysInput = document.getElementById('predict-days');
+    const parsedDays = Number.parseInt((daysInput && daysInput.value) || '', 10);
+    const days = Number.isFinite(parsedDays) ? Math.min(600, Math.max(60, parsedDays)) : 100;
+    if (daysInput) {
+        daysInput.value = String(days);
+    }
+    const newsAgeInput = document.getElementById('predict-news-age-hours');
+    const parsedNewsAge = Number.parseInt((newsAgeInput && newsAgeInput.value) || '', 10);
+    const maxNewsAgeHours = Number.isFinite(parsedNewsAge) ? Math.min(2160, Math.max(1, parsedNewsAge)) : 72;
+    if (newsAgeInput) {
+        newsAgeInput.value = String(maxNewsAgeHours);
+    }
     const useNews = document.getElementById('use-news').checked;
     const useRelevance = document.getElementById('use-relevance').checked;
     
@@ -374,7 +413,8 @@ async function runPrediction() {
             body: JSON.stringify({
                 days: days,
                 use_news: useNews,
-                use_relevance: useRelevance
+                use_relevance: useRelevance,
+                max_news_age_hours: maxNewsAgeHours
             })
         });
         
@@ -434,6 +474,7 @@ async function runPrediction() {
 // 页面加载时
 document.addEventListener('DOMContentLoaded', function() {
     loadStockList();
+    loadCurrentModelSummary();
     
     // 检查URL参数
     const urlParams = new URLSearchParams(window.location.search);
