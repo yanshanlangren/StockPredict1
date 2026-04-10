@@ -138,9 +138,14 @@
 
 {% block scripts %}
 <script>
-// 页面加载时检查模型状态
+let modelReadyForRecommend = true;
+let batchPredictPollTimer = null;
+let lastBatchPredictEndTime = null;
+
 document.addEventListener('DOMContentLoaded', async function() {
     await checkModelStatus();
+    await pollBatchPredictStatus();
+    startBatchPredictStatusPolling();
 });
 
 function applyModelOptimizedParams(model) {
@@ -173,14 +178,120 @@ async function checkModelStatus() {
         applyModelOptimizedParams(data.model || null);
         
         if (!data.model_available) {
+            modelReadyForRecommend = false;
             document.getElementById('model-warning').style.display = 'block';
             document.getElementById('predict-btn').disabled = true;
             document.getElementById('predict-btn').style.background = '#6c757d';
             document.getElementById('predict-btn').textContent = '⚠️ 请先完成模型训练';
+        } else {
+            modelReadyForRecommend = true;
+            const btn = document.getElementById('predict-btn');
+            if (btn && !btn.disabled) {
+                btn.textContent = '🚀 开始推荐';
+                btn.style.background = '#28a745';
+            }
         }
     } catch (error) {
         console.error('检查模型状态失败:', error);
     }
+}
+
+function startBatchPredictStatusPolling() {
+    if (batchPredictPollTimer) {
+        clearInterval(batchPredictPollTimer);
+    }
+    batchPredictPollTimer = setInterval(pollBatchPredictStatus, 3000);
+}
+
+function setPredictButtonRunning(running) {
+    const btn = document.getElementById('predict-btn');
+    if (!btn) return;
+
+    if (running) {
+        btn.disabled = true;
+        btn.textContent = '⏳ 推荐中...';
+        btn.style.background = '#6c757d';
+        return;
+    }
+
+    if (!modelReadyForRecommend) {
+        btn.disabled = true;
+        btn.textContent = '⚠️ 请先完成模型训练';
+        btn.style.background = '#6c757d';
+        return;
+    }
+
+    btn.disabled = false;
+    btn.textContent = '🚀 开始推荐';
+    btn.style.background = '#28a745';
+}
+
+function showPredictProgress(message, detailText, progress) {
+    document.getElementById('predict-progress').style.display = 'block';
+    document.getElementById('progress-message').textContent = message || '正在分析股票...';
+    document.getElementById('progress-detail').textContent = detailText || '任务执行中...';
+    document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, Number(progress || 0)))}%`;
+}
+
+function hidePredictProgress() {
+    document.getElementById('predict-progress').style.display = 'none';
+}
+
+async function pollBatchPredictStatus() {
+    try {
+        const response = await fetch('/api/predict/batch/status');
+        const payload = await response.json();
+        if (!payload.success) {
+            return;
+        }
+        const status = payload.status || {};
+        updateBatchPredictPanel(status);
+    } catch (error) {
+        console.error('查询股票推荐状态失败:', error);
+    }
+}
+
+function updateBatchPredictPanel(status) {
+    const isRunning = !!status.is_running;
+    const progress = Number(status.progress || 0);
+    const message = status.message || '等待任务启动...';
+    const detail = status.detail || {};
+
+    if (isRunning) {
+        const total = Number(detail.total_stocks || 0);
+        const current = Number(detail.current || 0);
+        const analyzed = Number(detail.analyzed || 0);
+        const predictions = Number(detail.predictions || 0);
+        const detailText = total > 0
+            ? `已处理 ${current}/${total}；有效预测 ${analyzed}；候选 ${predictions}`
+            : '后台任务执行中...';
+        setPredictButtonRunning(true);
+        showPredictProgress(message, detailText, progress);
+        return;
+    }
+
+    if (status.error) {
+        setPredictButtonRunning(false);
+        showPredictProgress(`任务失败：${status.error}`, '请调整参数后重试', progress);
+        if (status.end_time && status.end_time !== lastBatchPredictEndTime) {
+            lastBatchPredictEndTime = status.end_time;
+            alert(`股票推荐失败：${status.error}`);
+        }
+        return;
+    }
+
+    if (status.result) {
+        setPredictButtonRunning(false);
+        hidePredictProgress();
+        displayResults(status.result);
+        if (status.end_time) {
+            lastBatchPredictEndTime = status.end_time;
+        }
+        return;
+    }
+
+    setPredictButtonRunning(false);
+    hidePredictProgress();
 }
 
 function sanitizeIntInput(elementId, fallback, minValue, maxValue) {
@@ -217,7 +328,11 @@ function sanitizeFloatInput(elementId, fallback, minValue, maxValue) {
 
 // 开始股票推荐
 async function startBatchPredict() {
-    const btn = document.getElementById('predict-btn');
+    if (!modelReadyForRecommend) {
+        alert('请先完成模型训练后再执行股票推荐');
+        return;
+    }
+
     const topN = sanitizeIntInput('top-n', 30, 1, 200);
     const klineDays = sanitizeIntInput('kline-days', 240, 60, 600);
     const newsLimit = sanitizeIntInput('news-limit', 30, 1, 100);
@@ -227,15 +342,10 @@ async function startBatchPredict() {
     const minPrice = sanitizeFloatInput('min-price', 2, 0, 100000);
     const maxPrice = sanitizeFloatInput('max-price', 300, 0, 100000);
 
-    btn.disabled = true;
-    btn.textContent = '⏳ 推荐中...';
-    
-    document.getElementById('predict-progress').style.display = 'block';
+    setPredictButtonRunning(true);
     document.getElementById('predict-results').style.display = 'none';
     document.getElementById('no-results').style.display = 'none';
-    document.getElementById('progress-message').textContent = '正在扫描缓存中的全部股票并生成推荐...';
-    document.getElementById('progress-detail').textContent = '正在融合新闻与技术特征';
-    document.getElementById('progress-bar').style.width = '0%';
+    showPredictProgress('正在提交股票推荐任务...', '等待后台任务启动', 0);
     
     try {
         const response = await fetch('/api/predict/batch', {
@@ -264,17 +374,15 @@ async function startBatchPredict() {
         const data = await response.json();
         
         if (data.success) {
-            displayResults(data.data);
+            await pollBatchPredictStatus();
         } else {
             throw new Error(data.message || '股票推荐失败');
         }
     } catch (error) {
         console.error('股票推荐失败:', error);
         alert('股票推荐失败: ' + error.message);
-    } finally {
-        btn.disabled = false;
-        btn.textContent = '🚀 开始推荐';
-        document.getElementById('predict-progress').style.display = 'none';
+        setPredictButtonRunning(false);
+        hidePredictProgress();
     }
 }
 
@@ -288,6 +396,7 @@ function displayResults(data) {
     const horizonDays = data.predict_horizon_days || (data.model_info && data.model_info.predict_horizon_days) || 5;
     
     if (predictions.length === 0) {
+        document.getElementById('predict-results').style.display = 'none';
         document.getElementById('no-results').style.display = 'block';
         return;
     }

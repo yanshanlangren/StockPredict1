@@ -13,9 +13,10 @@ import os
 import json
 import logging
 import hashlib
+import math
 from typing import Optional, List, Dict, Tuple, Set
 from datetime import datetime, timedelta
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 import re
 
 import pandas as pd
@@ -31,6 +32,16 @@ try:
 except ImportError:
     AKSHARE_AVAILABLE = False
     logger.error("✗ akshare库未安装，新闻爬取功能不可用")
+
+try:
+    from curl_cffi import requests as curl_requests
+except ImportError:
+    curl_requests = None
+
+try:
+    import requests as std_requests
+except ImportError:
+    std_requests = None
 
 
 class NewsCrawler:
@@ -255,13 +266,21 @@ class NewsCrawler:
                 max_age_hours=max_age_hours,
             )
             if cached:
+                if len(cached) >= limit_value:
+                    logger.info(
+                        "从缓存加载 %s 条新闻 (stock=%s, source=%s)",
+                        len(cached),
+                        normalized_stock_code or "all",
+                        normalized_source,
+                    )
+                    return cached[:limit_value]
                 logger.info(
-                    "从缓存加载 %s 条新闻 (stock=%s, source=%s)",
+                    "缓存条数不足(%s < %s)，触发实时补拉 (stock=%s, source=%s)",
                     len(cached),
+                    limit_value,
                     normalized_stock_code or "all",
                     normalized_source,
                 )
-                return cached[:limit_value]
 
         try:
             fetched_news: List[Dict] = []
@@ -277,11 +296,16 @@ class NewsCrawler:
                     continue
 
                 try:
-                    df = ak.stock_news_em(symbol=symbol)
-                    if df is None or df.empty:
-                        continue
-
-                    for _, row in df.iterrows():
+                    if normalized_source == "all":
+                        target_count = min(max(limit_value, 120), 800)
+                    else:
+                        target_count = min(max(limit_value, 60), 2000)
+                    rows = self._fetch_source_rows(
+                        source_key=source_key,
+                        keyword=symbol,
+                        max_items=target_count,
+                    )
+                    for row in rows:
                         news_item = self._parse_news_row(row)
                         if not news_item:
                             continue
@@ -329,6 +353,260 @@ class NewsCrawler:
         except Exception as exc:
             logger.error("获取新闻失败: %s", exc)
             return []
+
+    def _fetch_source_rows(self, source_key: str, keyword: str, max_items: int) -> List[Dict]:
+        target_count = max(int(max_items), 1)
+        collected: List[Dict] = []
+
+        if source_key == "tencent":
+            collected.extend(self._fetch_tencent_hot_rows(max_items=target_count))
+
+        if len(collected) < target_count:
+            search_rows = self._fetch_eastmoney_search_rows(
+                keyword=keyword,
+                max_items=max(target_count, 100),
+            )
+            if search_rows:
+                collected.extend(search_rows)
+
+        deduped, _ = self._deduplicate_news_records(collected)
+        if deduped:
+            return deduped[:target_count]
+
+        # 回退到 akshare 原接口（历史上固定 pageSize=10）
+        fallback_rows: List[Dict] = []
+        try:
+            df = ak.stock_news_em(symbol=keyword)
+            if df is not None and not df.empty:
+                for _, row in df.iterrows():
+                    fallback_rows.append(dict(row))
+        except Exception as exc:
+            logger.warning("source=%s 回退接口抓取失败: %s", source_key, exc)
+        if fallback_rows:
+            deduped_fallback, _ = self._deduplicate_news_records(fallback_rows)
+            return deduped_fallback[:target_count]
+        return []
+
+    def _fetch_tencent_hot_rows(self, max_items: int = 100) -> List[Dict]:
+        target_count = max(1, min(int(max_items), 200))
+        url = "https://r.inews.qq.com/gw/event/hot_ranking_list"
+        params = {"page_size": max(50, target_count)}
+        headers = {
+            "accept": "application/json, text/plain, */*",
+            "user-agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/142.0.0.0 Safari/537.36"
+            ),
+            "referer": "https://new.qq.com/ch/finance/",
+        }
+
+        payload = self._http_get_json(url=url, params=params, headers=headers, timeout=20)
+        if not payload:
+            return []
+
+        id_list = payload.get("idlist", []) if isinstance(payload, dict) else []
+        if not id_list:
+            return []
+
+        news_list = id_list[0].get("newslist", []) if isinstance(id_list[0], dict) else []
+        rows: List[Dict] = []
+        for item in news_list:
+            if not isinstance(item, dict):
+                continue
+            title = self._strip_html_markup(item.get("title", ""))
+            if not title:
+                continue
+            publish_time = str(item.get("time", "") or "").strip()
+            if not publish_time:
+                ts_value = item.get("timestamp")
+                try:
+                    publish_time = datetime.fromtimestamp(float(ts_value)).strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    publish_time = ""
+
+            if not publish_time:
+                continue
+
+            article_url = str(item.get("url", "") or "").strip()
+            article_id = str(item.get("id", "") or "").strip()
+            if not article_url and article_id:
+                article_url = f"https://view.inews.qq.com/a/{article_id}"
+
+            rows.append(
+                {
+                    "关键词": "腾讯财经",
+                    "新闻标题": title,
+                    "新闻内容": self._strip_html_markup(item.get("abstract", "")),
+                    "发布时间": publish_time,
+                    "来源": str(item.get("source", "") or "").strip() or "腾讯新闻",
+                    "新闻链接": article_url,
+                }
+            )
+            if len(rows) >= target_count:
+                break
+        return rows
+
+    def _fetch_eastmoney_search_rows(self, keyword: str, max_items: int = 200) -> List[Dict]:
+        target_count = max(int(max_items), 1)
+        page_size = min(100, max(10, target_count))
+        max_pages = max(1, min(20, int(math.ceil(target_count / float(page_size))) + 1))
+
+        url = "https://search-api-web.eastmoney.com/search/jsonp"
+        headers = {
+            "accept": "*/*",
+            "cache-control": "no-cache",
+            "pragma": "no-cache",
+            "user-agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/142.0.0.0 Safari/537.36"
+            ),
+            "referer": f"https://so.eastmoney.com/news/s?keyword={quote(str(keyword or ''))}",
+        }
+
+        collected: List[Dict] = []
+        for page_index in range(1, max_pages + 1):
+            inner_param = {
+                "uid": "",
+                "keyword": keyword,
+                "type": ["cmsArticleWebOld"],
+                "client": "web",
+                "clientType": "web",
+                "clientVersion": "curr",
+                "param": {
+                    "cmsArticleWebOld": {
+                        "searchScope": "default",
+                        "sort": "default",
+                        "pageIndex": page_index,
+                        "pageSize": page_size,
+                        "preTag": "<em>",
+                        "postTag": "</em>",
+                    }
+                },
+            }
+            params = {
+                "cb": "jQuery35101792940631092459_1764599530165",
+                "param": json.dumps(inner_param, ensure_ascii=False),
+                "_": "1764599530176",
+            }
+
+            text = self._http_get_text(url=url, params=params, headers=headers, timeout=20)
+            if not text:
+                break
+
+            payload = self._parse_jsonp_payload(text)
+            result = payload.get("result", {}) if isinstance(payload, dict) else {}
+            items = result.get("cmsArticleWebOld", []) if isinstance(result, dict) else []
+            if not items:
+                break
+
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                title = self._strip_html_markup(item.get("title", ""))
+                content = self._strip_html_markup(item.get("content", ""))
+                if not title:
+                    continue
+                collected.append(
+                    {
+                        "关键词": keyword,
+                        "新闻标题": title,
+                        "新闻内容": content,
+                        "发布时间": str(item.get("date", "") or "").strip(),
+                        "来源": str(item.get("mediaName", "") or "").strip() or "未知",
+                        "新闻链接": self._build_eastmoney_url(item),
+                    }
+                )
+                if len(collected) >= target_count:
+                    return collected[:target_count]
+
+            if len(items) < page_size:
+                break
+
+        return collected[:target_count]
+
+    def _build_eastmoney_url(self, item: Dict) -> str:
+        direct_url = str(item.get("url", "") or "").strip()
+        if direct_url:
+            return direct_url
+        code = str(item.get("code", "") or "").strip()
+        if code:
+            return f"http://finance.eastmoney.com/a/{code}.html"
+        return ""
+
+    def _parse_jsonp_payload(self, text: str) -> Dict:
+        raw = str(text or "").strip()
+        if not raw:
+            return {}
+        if raw.startswith("{"):
+            try:
+                return json.loads(raw)
+            except Exception:
+                return {}
+
+        left = raw.find("(")
+        right = raw.rfind(")")
+        if left < 0 or right <= left:
+            return {}
+        inner = raw[left + 1 : right]
+        try:
+            return json.loads(inner)
+        except Exception:
+            return {}
+
+    def _http_get_text(self, url: str, params: Dict, headers: Dict, timeout: int = 20) -> str:
+        if curl_requests is not None:
+            try:
+                resp = curl_requests.get(url, params=params, headers=headers, timeout=timeout)
+                if getattr(resp, "status_code", 0) == 200:
+                    return str(resp.text or "")
+            except Exception:
+                pass
+
+        if std_requests is not None:
+            try:
+                resp = std_requests.get(url, params=params, headers=headers, timeout=timeout)
+                if resp.status_code == 200:
+                    return str(resp.text or "")
+            except Exception:
+                pass
+
+        return ""
+
+    def _http_get_json(self, url: str, params: Dict, headers: Dict, timeout: int = 20) -> Dict:
+        text = self._http_get_text(url=url, params=params, headers=headers, timeout=timeout)
+        if not text:
+            return {}
+        try:
+            return json.loads(text)
+        except Exception:
+            return {}
+
+    def _deduplicate_news_records(self, rows: List[Dict]) -> Tuple[List[Dict], int]:
+        if not rows:
+            return [], 0
+        selected: List[Dict] = []
+        seen = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            title = self._strip_html_markup(row.get("新闻标题", row.get("标题", "")))
+            publish = str(row.get("发布时间", row.get("时间", "")) or "").strip()
+            link = str(row.get("新闻链接", row.get("链接", "")) or "").strip()
+            dedup_key = f"{title}|{publish}|{link}"
+            if not title or dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+            selected.append(row)
+        removed = max(len(rows) - len(selected), 0)
+        return selected, removed
+
+    def _strip_html_markup(self, text: str) -> str:
+        raw = str(text or "")
+        cleaned = re.sub(r"<[^>]+>", "", raw)
+        cleaned = cleaned.replace("\u3000", " ").replace("\r", " ").replace("\n", " ")
+        return re.sub(r"\s+", " ", cleaned).strip()
 
     def _parse_news_row(self, row) -> Optional[Dict]:
         """
