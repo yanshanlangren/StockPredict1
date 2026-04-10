@@ -51,6 +51,11 @@ PROJECT_ROOT = _get_project_root()
 MODEL_DIR = os.path.join(PROJECT_ROOT, "models")
 RESULT_DIR = os.path.join(PROJECT_ROOT, "results")
 MODEL_NAME = "multimodal_stock_predictor"
+RETURN_TARGET_CLIP_DECIMAL = 0.35
+PREDICTED_RETURN_CLIP_DECIMAL = 0.35
+EXPECTED_RETURN_CAP_MIN_PCT = 6.0
+EXPECTED_RETURN_CAP_MAX_PCT = 45.0
+EXPECTED_RETURN_CAP_VOL_MULTIPLIER = 2.8
 
 
 class MultiModalPredictor:
@@ -285,7 +290,11 @@ class MultiModalPredictor:
 
         # 过滤异常值并裁剪至合理区间（future_ret_5d）
         return_targets = np.nan_to_num(return_targets, nan=0.0, posinf=0.0, neginf=0.0)
-        return_targets = np.clip(return_targets, -0.20, 0.20)
+        return_targets = np.clip(
+            return_targets,
+            -RETURN_TARGET_CLIP_DECIMAL,
+            RETURN_TARGET_CLIP_DECIMAL,
+        )
 
         matrices = {
             "news": news,
@@ -591,7 +600,7 @@ class MultiModalPredictor:
             "targets": {
                 "classification": "label_up_5d",
                 "regression": "future_ret_5d(decimal)",
-                "regression_clip": [-0.20, 0.20],
+                "regression_clip": [-RETURN_TARGET_CLIP_DECIMAL, RETURN_TARGET_CLIP_DECIMAL],
             },
             "baseline_comparison": comparison,
             "production_model_replaced": should_replace,
@@ -1011,7 +1020,13 @@ class MultiModalPredictor:
             if np.isnan(predicted_return_decimal) or np.isinf(predicted_return_decimal):
                 predicted_return_decimal = None
             else:
-                predicted_return_decimal = float(np.clip(predicted_return_decimal, -0.20, 0.20))
+                predicted_return_decimal = float(
+                    np.clip(
+                        predicted_return_decimal,
+                        -PREDICTED_RETURN_CLIP_DECIMAL,
+                        PREDICTED_RETURN_CLIP_DECIMAL,
+                    )
+                )
 
         if predicted_return_decimal is not None:
             prediction = 1 if predicted_return_decimal >= 0 else 0
@@ -1192,6 +1207,15 @@ class MultiModalPredictor:
             if valid_values:
                 sector_mean = np.mean(valid_values)
 
+        vol_20d_pct = abs(safe_float(tech_features[0, 3], 0.0))
+        dynamic_cap_pct = float(
+            np.clip(
+                max(vol_20d_pct * EXPECTED_RETURN_CAP_VOL_MULTIPLIER, EXPECTED_RETURN_CAP_MIN_PCT),
+                EXPECTED_RETURN_CAP_MIN_PCT,
+                EXPECTED_RETURN_CAP_MAX_PCT,
+            )
+        )
+
         prediction.update(
             {
                 "stock_code": stock_code,
@@ -1212,18 +1236,23 @@ class MultiModalPredictor:
         expected_return_source = "regression_head"
         predicted_return_decimal = prediction.get("predicted_return_decimal")
         if predicted_return_decimal is not None:
-            expected_return = float(predicted_return_decimal) * 100.0
+            regression_cap_pct = RETURN_TARGET_CLIP_DECIMAL * 100.0
+            expected_return = float(
+                np.clip(
+                    float(predicted_return_decimal) * 100.0,
+                    -regression_cap_pct,
+                    regression_cap_pct,
+                )
+            )
         else:
             # 兼容旧模型：若无回归头输出，则按概率与波动率估算收益幅度
             prob = safe_float(prediction.get("probability"), 0.5)
-            vol_20d_pct = abs(safe_float(tech_features[0, 3], 0.0))
             # vol_20d_pct 来自 20 日波动率（百分比），用于动态收益尺度
             scale_pct = float(np.clip(vol_20d_pct * 1.8, 0.8, 12.0))
             direction_strength = float(np.tanh((prob - 0.5) * 3.8))
             expected_return = direction_strength * scale_pct
             expected_return_source = "probability_volatility_fallback"
-
-        expected_return = float(np.clip(expected_return, -20.0, 20.0))
+            expected_return = float(np.clip(expected_return, -dynamic_cap_pct, dynamic_cap_pct))
         predicted_price = latest_price * (1 + expected_return / 100.0)
 
         prediction["expected_return"] = round(expected_return, 2)

@@ -1,0 +1,42 @@
+[
+  {
+    "source_id": "eastmoney",
+    "name": "东方财富",
+    "adapter": "json_api",
+    "keyword": "财经新闻",
+    "enabled": true,
+    "description": "默认东方财富新闻源（聚合检索）",
+    "sort_order": 10,
+    "is_builtin": true,
+    "adapter_config": {
+      "preset": "eastmoney_search"
+    }
+  },
+  {
+    "source_id": "sina",
+    "name": "新浪财经",
+    "adapter": "json_api",
+    "keyword": "新浪财经",
+    "enabled": true,
+    "description": "默认新浪财经新闻源（聚合检索）",
+    "sort_order": 20,
+    "is_builtin": true,
+    "adapter_config": {
+      "preset": "eastmoney_search"
+    }
+  },
+  {
+    "source_id": "tencent",
+    "name": "腾讯财经",
+    "adapter": "json_api",
+    "keyword": "腾讯财经",
+    "enabled": true,
+    "description": "默认腾讯财经新闻源（腾讯热榜+聚合补充）",
+    "sort_order": 30,
+    "is_builtin": true,
+    "adapter_config": {
+      "preset": "tencent_hot",
+      "fallback_search": true
+    }
+  }
+]

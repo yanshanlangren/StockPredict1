@@ -16,10 +16,7 @@
             <div style="width: 150px;">
                 <label style="display: block; margin-bottom: 5px; font-weight: 500;">新闻源</label>
                 <select id="news-source" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-                    <option value="eastmoney">东方财富</option>
-                    <option value="sina">新浪财经</option>
-                    <option value="tencent">腾讯财经</option>
-                    <option value="all">全部来源</option>
+                    <option value="all">加载新闻源中...</option>
                 </select>
             </div>
             <div style="width: 120px;">
@@ -36,6 +33,102 @@
                     style="padding: 10px 25px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">
                 🔍 查询
             </button>
+        </div>
+    </div>
+</div>
+
+<!-- 新闻源管理 -->
+<div class="card" style="margin-top: 20px;">
+    <h3>🧭 新闻源管理</h3>
+    <div id="news-source-manage-message" style="display: none; margin-bottom: 10px; padding: 10px 12px; border-radius: 6px;"></div>
+    <div style="margin-bottom: 12px; padding: 10px; border: 1px dashed #cbd5e1; border-radius: 8px; background: #f8fafc;">
+        <div style="font-size: 13px; color: #475569; margin-bottom: 8px;">自动分析页面结构并生成 `html_selector` 配置</div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+            <input type="text" id="source-analyze-url" placeholder="输入新闻列表页URL，如 https://economy.caijing.com.cn/"
+                   style="flex: 1; min-width: 320px; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 4px;">
+            <button id="source-analyze-btn" onclick="analyzeNewsSourceUrl()"
+                    style="padding: 8px 14px; border: none; border-radius: 4px; background: #2563eb; color: white; cursor: pointer;">
+                自动分析并填充
+            </button>
+        </div>
+        <div id="source-analyze-result" style="margin-top: 8px; font-size: 13px; color: #475569;"></div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
+        <div>
+            <label style="display: block; margin-bottom: 5px; font-weight: 500;">来源标识 source_id（可选）</label>
+            <input type="text" id="source-id-input" placeholder="如: eastmoney_ext"
+                   style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+        </div>
+        <div>
+            <label style="display: block; margin-bottom: 5px; font-weight: 500;">显示名称</label>
+            <input type="text" id="source-name-input" placeholder="如: 东方财富扩展源"
+                   style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+        </div>
+        <div>
+            <label style="display: block; margin-bottom: 5px; font-weight: 500;">抓取适配器</label>
+            <select id="source-adapter-select" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"></select>
+        </div>
+        <div>
+            <label style="display: block; margin-bottom: 5px; font-weight: 500;">检索关键词</label>
+            <input type="text" id="source-keyword-input" placeholder="如: 财经新闻"
+                   style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+        </div>
+        <div>
+            <label style="display: block; margin-bottom: 5px; font-weight: 500;">排序优先级</label>
+            <input type="number" id="source-sort-order-input" value="100" min="-10000" max="10000"
+                   style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+        </div>
+        <div>
+            <label style="display: block; margin-bottom: 5px; font-weight: 500;">描述（可选）</label>
+            <input type="text" id="source-description-input" placeholder="该来源用途说明"
+                   style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+        </div>
+        <div style="grid-column: 1 / -1;">
+            <label style="display: block; margin-bottom: 5px; font-weight: 500;">适配器配置 adapter_config（JSON）</label>
+            <textarea id="source-adapter-config-input" rows="8"
+                      placeholder='例如: {"url":"https://example.com/feed.xml","item_selector":"article"}'
+                      style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;"></textarea>
+            <div style="margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap;">
+                <button type="button" onclick="applyAdapterTemplate(true)"
+                        style="padding: 4px 10px; border: 1px solid #cbd5e1; border-radius: 4px; background: #f8fafc; cursor: pointer;">
+                    填充当前适配器模板
+                </button>
+                <button type="button" onclick="formatAdapterConfigInput()"
+                        style="padding: 4px 10px; border: 1px solid #cbd5e1; border-radius: 4px; background: #f8fafc; cursor: pointer;">
+                    格式化JSON
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div style="margin-top: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+        <label style="display: flex; align-items: center; gap: 6px;">
+            <input type="checkbox" id="source-enabled-checkbox" checked>
+            <span>启用该新闻源</span>
+        </label>
+        <span id="source-form-mode" style="font-size: 13px; color: #64748b;">当前模式：新增</span>
+    </div>
+
+    <div style="margin-top: 12px; display: flex; gap: 10px; flex-wrap: wrap;">
+        <button id="news-source-save-btn" onclick="submitNewsSourceForm()"
+                style="padding: 9px 20px; border: none; border-radius: 4px; background: #0f766e; color: white; cursor: pointer;">
+            保存新闻源
+        </button>
+        <button onclick="resetNewsSourceForm()"
+                style="padding: 9px 20px; border: 1px solid #cbd5e1; border-radius: 4px; background: #f8fafc; color: #334155; cursor: pointer;">
+            重置
+        </button>
+        <button onclick="loadNewsSources(true)"
+                style="padding: 9px 20px; border: 1px solid #cbd5e1; border-radius: 4px; background: white; color: #334155; cursor: pointer;">
+            刷新列表
+        </button>
+    </div>
+
+    <div style="margin-top: 16px;">
+        <h4 style="margin: 0 0 8px 0;">已配置新闻源</h4>
+        <div id="news-source-list" style="border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+            <div style="padding: 12px; color: #64748b;">加载中...</div>
         </div>
     </div>
 </div>
@@ -151,13 +244,454 @@ const NEWS_FEATURE_PERCENT_KEYS = new Set([
     'source_entropy'
 ]);
 
-const NEWS_SOURCE_LABEL_MAP = {
+let NEWS_SOURCE_LABEL_MAP = {
     eastmoney: '东方财富',
     sina: '新浪财经',
     tencent: '腾讯财经',
     all: '全部来源',
     unknown: '未知来源'
 };
+let NEWS_SOURCE_ITEMS = [];
+let NEWS_SOURCE_ADAPTERS = ['json_api', 'html_selector', 'rss'];
+let NEWS_SOURCE_ADAPTER_TEMPLATES = {};
+let NEWS_SOURCE_EDITING_ID = '';
+
+function showNewsSourceManageMessage(message, isError = false) {
+    const el = document.getElementById('news-source-manage-message');
+    if (!el) {
+        return;
+    }
+    if (!message) {
+        el.style.display = 'none';
+        el.textContent = '';
+        return;
+    }
+    el.style.display = 'block';
+    el.style.background = isError ? '#fee2e2' : '#dcfce7';
+    el.style.color = isError ? '#991b1b' : '#166534';
+    el.style.border = `1px solid ${isError ? '#fecaca' : '#bbf7d0'}`;
+    el.textContent = message;
+}
+
+function renderSourceAdapterOptions() {
+    const select = document.getElementById('source-adapter-select');
+    if (!select) {
+        return;
+    }
+    const previous = select.value;
+    const adapters = Array.isArray(NEWS_SOURCE_ADAPTERS) && NEWS_SOURCE_ADAPTERS.length > 0
+        ? NEWS_SOURCE_ADAPTERS
+        : ['json_api', 'html_selector', 'rss'];
+    select.innerHTML = adapters
+        .map(adapter => `<option value="${escapeHtml(String(adapter))}">${escapeHtml(String(adapter))}</option>`)
+        .join('');
+    if (previous && adapters.includes(previous)) {
+        select.value = previous;
+    }
+    select.onchange = () => applyAdapterTemplate(false);
+}
+
+function currentAdapterTemplate() {
+    const adapter = String(document.getElementById('source-adapter-select')?.value || '').trim();
+    if (!adapter) {
+        return {};
+    }
+    const template = NEWS_SOURCE_ADAPTER_TEMPLATES[adapter];
+    if (template && typeof template === 'object') {
+        return template;
+    }
+    return {};
+}
+
+function formatAdapterConfigInput() {
+    const input = document.getElementById('source-adapter-config-input');
+    if (!input) {
+        return;
+    }
+    const raw = String(input.value || '').trim();
+    if (!raw) {
+        return;
+    }
+    try {
+        const parsed = JSON.parse(raw);
+        input.value = JSON.stringify(parsed, null, 2);
+    } catch (error) {
+        showNewsSourceManageMessage(`adapter_config JSON 格式错误: ${error.message}`, true);
+    }
+}
+
+function applyAdapterTemplate(force = false) {
+    const input = document.getElementById('source-adapter-config-input');
+    if (!input) {
+        return;
+    }
+    const current = String(input.value || '').trim();
+    if (!force && current) {
+        return;
+    }
+    const template = currentAdapterTemplate();
+    input.value = JSON.stringify(template, null, 2);
+}
+
+function setAnalyzeResultHtml(html, isError = false) {
+    const el = document.getElementById('source-analyze-result');
+    if (!el) {
+        return;
+    }
+    el.style.color = isError ? '#b91c1c' : '#475569';
+    el.innerHTML = html || '';
+}
+
+function renderAnalyzePreview(data) {
+    const analysis = data.analysis || {};
+    const preview = Array.isArray(data.preview) ? data.preview : [];
+    const examples = Array.isArray(analysis.examples) ? analysis.examples : [];
+
+    const previewHtml = preview.length > 0
+        ? `<ul style="margin: 6px 0 0 16px; padding: 0;">${
+            preview.map(item => `<li style="margin-bottom: 4px;">
+                <a href="${escapeHtml(String(item.url || ''))}" target="_blank" rel="noopener noreferrer" style="color:#1d4ed8; text-decoration:none;">
+                    ${escapeHtml(String(item.title || ''))}
+                </a>
+                <span style="color:#64748b; margin-left: 6px;">${escapeHtml(String(item.publish_time || '-'))}</span>
+            </li>`).join('')
+        }</ul>`
+        : '<div style="margin-top:4px; color:#64748b;">未抽取到预览新闻，请检查页面是否需要登录或反爬限制。</div>';
+
+    const exampleText = examples.length > 0 ? examples.map(x => escapeHtml(String(x))).join(' / ') : '无';
+    return `
+        <div style="color:#166534;">分析完成：已自动填充表单，可直接保存。</div>
+        <div style="margin-top:4px;">识别选择器：<code>${escapeHtml(String(analysis.selector || '-'))}</code></div>
+        <div>命中条数：${escapeHtml(String(analysis.unique_hit || 0))}，日期命中：${escapeHtml(String(analysis.date_hit || 0))}</div>
+        <div>样例标题：${exampleText}</div>
+        ${analysis.rss_candidate ? `<div>RSS候选：<code>${escapeHtml(String(analysis.rss_candidate))}</code></div>` : ''}
+        <div style="margin-top:6px;">预览：</div>
+        ${previewHtml}
+    `;
+}
+
+async function analyzeNewsSourceUrl() {
+    const urlInput = document.getElementById('source-analyze-url');
+    const analyzeBtn = document.getElementById('source-analyze-btn');
+    const sourceName = document.getElementById('source-name-input').value.trim();
+    const keyword = document.getElementById('source-keyword-input').value.trim();
+    const url = (urlInput?.value || '').trim();
+    if (!url) {
+        setAnalyzeResultHtml('请输入要分析的新闻列表URL。', true);
+        return;
+    }
+
+    analyzeBtn.disabled = true;
+    analyzeBtn.textContent = '分析中...';
+    setAnalyzeResultHtml('正在分析页面结构，请稍候...');
+    try {
+        const response = await fetch('/api/news/sources/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url,
+                source_name: sourceName || '自定义新闻源',
+                keyword: keyword || sourceName || '财经'
+            })
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.success) {
+            throw new Error(payload.message || '自动分析失败');
+        }
+        const data = payload.data || {};
+
+        if (!NEWS_SOURCE_EDITING_ID) {
+            const sourceIdEl = document.getElementById('source-id-input');
+            if (!sourceIdEl.value.trim()) {
+                sourceIdEl.value = String(data.suggested_source_id || '');
+            }
+        }
+        const sourceNameEl = document.getElementById('source-name-input');
+        if (!sourceNameEl.value.trim() && data.suggested_name) {
+            sourceNameEl.value = String(data.suggested_name);
+        }
+        const keywordEl = document.getElementById('source-keyword-input');
+        if (!keywordEl.value.trim() && data.keyword) {
+            keywordEl.value = String(data.keyword);
+        }
+
+        const adapter = String(data.adapter || 'html_selector');
+        document.getElementById('source-adapter-select').value = adapter;
+        document.getElementById('source-adapter-config-input').value = JSON.stringify(data.adapter_config || {}, null, 2);
+
+        setAnalyzeResultHtml(renderAnalyzePreview(data), false);
+        showNewsSourceManageMessage('自动分析成功，配置已填充到表单。');
+    } catch (error) {
+        console.error('自动分析新闻源失败:', error);
+        setAnalyzeResultHtml(`自动分析失败：${escapeHtml(error.message)}`, true);
+        showNewsSourceManageMessage(`自动分析失败: ${error.message}`, true);
+    } finally {
+        analyzeBtn.disabled = false;
+        analyzeBtn.textContent = '自动分析并填充';
+    }
+}
+
+function renderNewsSourceSelect(preserveSelection = true) {
+    const select = document.getElementById('news-source');
+    if (!select) {
+        return;
+    }
+
+    const previous = preserveSelection ? select.value : '';
+    const enabledSources = NEWS_SOURCE_ITEMS.filter(item => item && item.enabled !== false);
+
+    const optionHtml = enabledSources
+        .map(item => `<option value="${escapeHtml(String(item.source_id || ''))}">${escapeHtml(String(item.name || item.source_id || '未命名新闻源'))}</option>`)
+        .join('');
+    select.innerHTML = `${optionHtml}<option value="all">全部来源</option>`;
+
+    if (previous && [...select.options].some(op => op.value === previous)) {
+        select.value = previous;
+    } else if (enabledSources.length > 0) {
+        select.value = String(enabledSources[0].source_id || 'all');
+    } else {
+        select.value = 'all';
+    }
+}
+
+function renderNewsSourceList() {
+    const container = document.getElementById('news-source-list');
+    if (!container) {
+        return;
+    }
+    if (!NEWS_SOURCE_ITEMS.length) {
+        container.innerHTML = '<div style="padding: 12px; color: #64748b;">暂无新闻源配置</div>';
+        return;
+    }
+
+    const rows = NEWS_SOURCE_ITEMS.map(item => {
+        const sourceId = String(item.source_id || '');
+        const encodedId = encodeURIComponent(sourceId);
+        const enabledText = item.enabled === false ? '禁用' : '启用';
+        const enabledColor = item.enabled === false ? '#64748b' : '#16a34a';
+        const builtIn = item.is_builtin ? '内置' : '自定义';
+        const cfg = item.adapter_config && typeof item.adapter_config === 'object' ? item.adapter_config : {};
+        const configSummary = cfg.preset
+            ? `preset=${String(cfg.preset)}`
+            : Object.keys(cfg).slice(0, 3).join(', ') || '-';
+        return `
+            <tr style="border-top: 1px solid #e2e8f0;">
+                <td style="padding: 8px 10px; white-space: nowrap;">${escapeHtml(sourceId)}</td>
+                <td style="padding: 8px 10px;">${escapeHtml(String(item.name || '-'))}</td>
+                <td style="padding: 8px 10px;">${escapeHtml(String(item.adapter || '-'))}</td>
+                <td style="padding: 8px 10px;">${escapeHtml(String(item.keyword || '-'))}</td>
+                <td style="padding: 8px 10px;">${escapeHtml(configSummary)}</td>
+                <td style="padding: 8px 10px; color: ${enabledColor};">${enabledText}</td>
+                <td style="padding: 8px 10px;">${escapeHtml(String(item.sort_order ?? 100))}</td>
+                <td style="padding: 8px 10px;">${builtIn}</td>
+                <td style="padding: 8px 10px; min-width: 140px;">
+                    <button onclick="editNewsSource('${encodedId}')" style="padding: 4px 8px; border: 1px solid #cbd5e1; background: white; border-radius: 4px; cursor: pointer;">编辑</button>
+                    <button onclick="deleteNewsSource('${encodedId}')" style="padding: 4px 8px; border: 1px solid #fecaca; background: #fff1f2; color: #b91c1c; border-radius: 4px; cursor: pointer; margin-left: 6px;">删除</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    container.innerHTML = `
+        <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                <thead style="background: #f8fafc;">
+                    <tr>
+                        <th style="padding: 8px 10px; text-align: left;">source_id</th>
+                        <th style="padding: 8px 10px; text-align: left;">名称</th>
+                        <th style="padding: 8px 10px; text-align: left;">adapter</th>
+                        <th style="padding: 8px 10px; text-align: left;">keyword</th>
+                        <th style="padding: 8px 10px; text-align: left;">adapter_config</th>
+                        <th style="padding: 8px 10px; text-align: left;">状态</th>
+                        <th style="padding: 8px 10px; text-align: left;">排序</th>
+                        <th style="padding: 8px 10px; text-align: left;">类型</th>
+                        <th style="padding: 8px 10px; text-align: left;">操作</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+    `;
+}
+
+function resetNewsSourceForm() {
+    NEWS_SOURCE_EDITING_ID = '';
+    document.getElementById('source-id-input').value = '';
+    document.getElementById('source-id-input').disabled = false;
+    document.getElementById('source-name-input').value = '';
+    if (NEWS_SOURCE_ADAPTERS.length > 0) {
+        document.getElementById('source-adapter-select').value = String(NEWS_SOURCE_ADAPTERS[0]);
+    }
+    document.getElementById('source-keyword-input').value = '';
+    document.getElementById('source-description-input').value = '';
+    document.getElementById('source-sort-order-input').value = '100';
+    document.getElementById('source-adapter-config-input').value = '';
+    document.getElementById('source-enabled-checkbox').checked = true;
+    document.getElementById('source-form-mode').textContent = '当前模式：新增';
+    applyAdapterTemplate(true);
+    showNewsSourceManageMessage('');
+}
+
+async function loadNewsSources(preserveSelection = true) {
+    try {
+        const response = await fetch('/api/news/sources?include_disabled=1');
+        const payload = await response.json();
+        if (!response.ok || !payload.success) {
+            throw new Error(payload.message || '加载新闻源失败');
+        }
+        const data = payload.data || {};
+        NEWS_SOURCE_ITEMS = Array.isArray(data.sources) ? data.sources : [];
+        NEWS_SOURCE_ADAPTERS = Array.isArray(data.adapters) && data.adapters.length
+            ? data.adapters
+            : ['json_api', 'html_selector', 'rss'];
+        NEWS_SOURCE_ADAPTER_TEMPLATES = (data.adapter_templates && typeof data.adapter_templates === 'object')
+            ? data.adapter_templates
+            : {};
+
+        NEWS_SOURCE_LABEL_MAP = { all: '全部来源', unknown: '未知来源' };
+        NEWS_SOURCE_ITEMS.forEach(item => {
+            const sourceId = String(item.source_id || '').trim();
+            const sourceName = String(item.name || sourceId || '').trim();
+            if (sourceId && sourceName) {
+                NEWS_SOURCE_LABEL_MAP[sourceId] = sourceName;
+            }
+        });
+
+        renderSourceAdapterOptions();
+        renderNewsSourceSelect(preserveSelection);
+        renderNewsSourceList();
+    } catch (error) {
+        console.error('加载新闻源配置失败:', error);
+        showNewsSourceManageMessage(`加载新闻源配置失败: ${error.message}`, true);
+    }
+}
+
+function editNewsSource(encodedSourceId) {
+    const sourceId = decodeURIComponent(String(encodedSourceId || ''));
+    const source = NEWS_SOURCE_ITEMS.find(item => String(item.source_id || '') === sourceId);
+    if (!source) {
+        showNewsSourceManageMessage(`未找到新闻源: ${sourceId}`, true);
+        return;
+    }
+
+    NEWS_SOURCE_EDITING_ID = sourceId;
+    document.getElementById('source-id-input').value = sourceId;
+    document.getElementById('source-id-input').disabled = true;
+    document.getElementById('source-name-input').value = String(source.name || '');
+    document.getElementById('source-adapter-select').value = String(source.adapter || NEWS_SOURCE_ADAPTERS[0] || 'json_api');
+    document.getElementById('source-keyword-input').value = String(source.keyword || '');
+    document.getElementById('source-sort-order-input').value = String(source.sort_order ?? 100);
+    document.getElementById('source-description-input').value = String(source.description || '');
+    const adapterConfig = source.adapter_config && typeof source.adapter_config === 'object' ? source.adapter_config : {};
+    document.getElementById('source-adapter-config-input').value = JSON.stringify(adapterConfig, null, 2);
+    document.getElementById('source-enabled-checkbox').checked = source.enabled !== false;
+    document.getElementById('source-form-mode').textContent = `当前模式：编辑 ${sourceId}`;
+    showNewsSourceManageMessage('');
+}
+
+async function submitNewsSourceForm() {
+    const sourceIdInput = document.getElementById('source-id-input').value.trim();
+    const name = document.getElementById('source-name-input').value.trim();
+    const adapter = document.getElementById('source-adapter-select').value;
+    const keyword = document.getElementById('source-keyword-input').value.trim();
+    const sortOrderRaw = Number.parseInt(document.getElementById('source-sort-order-input').value || '100', 10);
+    const description = document.getElementById('source-description-input').value.trim();
+    const adapterConfigText = document.getElementById('source-adapter-config-input').value.trim();
+    const enabled = !!document.getElementById('source-enabled-checkbox').checked;
+
+    if (!name) {
+        showNewsSourceManageMessage('显示名称不能为空', true);
+        return;
+    }
+
+    let adapterConfig = {};
+    if (adapterConfigText) {
+        try {
+            const parsed = JSON.parse(adapterConfigText);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                throw new Error('adapter_config 需要是JSON对象');
+            }
+            adapterConfig = parsed;
+        } catch (error) {
+            showNewsSourceManageMessage(`adapter_config JSON 格式错误: ${error.message}`, true);
+            return;
+        }
+    } else {
+        adapterConfig = currentAdapterTemplate();
+    }
+
+    const payload = {
+        name,
+        adapter,
+        keyword: keyword || name,
+        sort_order: Number.isFinite(sortOrderRaw) ? sortOrderRaw : 100,
+        description,
+        adapter_config: adapterConfig,
+        enabled
+    };
+
+    let url = '/api/news/sources';
+    let method = 'POST';
+    if (NEWS_SOURCE_EDITING_ID) {
+        url = `/api/news/sources/${encodeURIComponent(NEWS_SOURCE_EDITING_ID)}`;
+        method = 'PUT';
+    } else if (sourceIdInput) {
+        payload.source_id = sourceIdInput;
+    }
+
+    const saveBtn = document.getElementById('news-source-save-btn');
+    saveBtn.disabled = true;
+    saveBtn.textContent = '保存中...';
+
+    try {
+        const response = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || '保存失败');
+        }
+
+        resetNewsSourceForm();
+        await loadNewsSources(true);
+        showNewsSourceManageMessage(result.message || '保存成功');
+    } catch (error) {
+        console.error('保存新闻源失败:', error);
+        showNewsSourceManageMessage(`保存失败: ${error.message}`, true);
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = '保存新闻源';
+    }
+}
+
+async function deleteNewsSource(encodedSourceId) {
+    const sourceId = decodeURIComponent(String(encodedSourceId || ''));
+    const source = NEWS_SOURCE_ITEMS.find(item => String(item.source_id || '') === sourceId);
+    const sourceName = source ? String(source.name || sourceId) : sourceId;
+    if (!window.confirm(`确认删除新闻源「${sourceName}」?`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/news/sources/${encodeURIComponent(sourceId)}`, {
+            method: 'DELETE'
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.success) {
+            throw new Error(payload.message || '删除失败');
+        }
+        if (NEWS_SOURCE_EDITING_ID === sourceId) {
+            resetNewsSourceForm();
+        }
+        await loadNewsSources(true);
+        showNewsSourceManageMessage(payload.message || '删除成功');
+    } catch (error) {
+        console.error('删除新闻源失败:', error);
+        showNewsSourceManageMessage(`删除失败: ${error.message}`, true);
+    }
+}
 
 async function loadNews() {
     const stockCode = document.getElementById('stock-code').value.trim();
@@ -316,9 +850,10 @@ function displayStatistics(stats) {
     // 来源分布
     const sourceDiv = document.getElementById('source-distribution');
     const sources = stats.source_distribution || {};
+    const sourceNameMap = stats.source_name_map || {};
     sourceDiv.innerHTML = Object.entries(sources).map(([source, count]) => 
         `<span style="background: #d4edda; color: #155724; padding: 5px 12px; border-radius: 15px; font-size: 13px;">
-            ${escapeHtml(getNewsSourceLabel(source))} (${count})
+            ${escapeHtml(sourceNameMap[source] || getNewsSourceLabel(source))} (${count})
         </span>`
     ).join('') || '<span style="color: #888;">暂无数据</span>';
 }
@@ -355,7 +890,7 @@ function displayNews(newsList) {
                 </p>
                 <div style="display: flex; gap: 20px; font-size: 12px; color: #888;">
                     <span>📅 ${news.publish_time || '未知时间'}</span>
-                    <span>📍 ${escapeHtml(getNewsSourceLabel(news.source || 'unknown'))}</span>
+                    <span>📍 ${escapeHtml(String(news.source_name || getNewsSourceLabel(news.source || 'unknown')))}</span>
                     <span>⭐ 重要性: ${((news.importance || 0.5) * 100).toFixed(0)}%</span>
                     <span>📊 情感: ${sentiment.toFixed(2)}</span>
                 </div>
@@ -486,7 +1021,22 @@ function formatNewsFeatureValue(key, value) {
 }
 
 function getNewsSourceLabel(source) {
-    return NEWS_SOURCE_LABEL_MAP[source] || source || '未知来源';
+    const key = String(source || '').trim();
+    if (!key) {
+        return '未知来源';
+    }
+    if (NEWS_SOURCE_LABEL_MAP[key]) {
+        return NEWS_SOURCE_LABEL_MAP[key];
+    }
+    const found = NEWS_SOURCE_ITEMS.find(item => {
+        const sourceId = String(item.source_id || '').trim();
+        const sourceName = String(item.name || '').trim();
+        return key === sourceId || key === sourceName;
+    });
+    if (found) {
+        return String(found.name || found.source_id || key);
+    }
+    return key;
 }
 
 function normalizeNewsUrl(url) {
@@ -504,7 +1054,10 @@ function normalizeNewsUrl(url) {
 }
 
 // 页面加载时查询
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
+    renderSourceAdapterOptions();
+    resetNewsSourceForm();
+    await loadNewsSources(false);
     loadNews();
 });
 </script>

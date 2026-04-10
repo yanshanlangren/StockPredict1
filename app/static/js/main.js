@@ -272,12 +272,21 @@ const PARAM_HELP_BY_ID = {
     'max-price': '最高价格：过滤高于该阈值的股票，控制候选池价格区间。',
     'batch-use-news': '融合新闻情感与领域影响：启用后推荐时将加入新闻特征。',
     'batch-use-relevance': '融合相关性矩阵：启用后推荐时将加入股票关联图谱特征。',
-    'news-source': '新闻源：选择查询的新闻来源渠道（东方财富/新浪/腾讯/全部）。',
+    'news-source': '新闻源：选择查询来源，选项来自新闻中心的新闻源配置（可新增/编辑/删除）。',
     'news-max-age-hours': '新闻时效（小时）：新闻中心仅展示最近 N 小时的新闻记录。',
+    'source-id-input': '新闻源标识：系统内部唯一ID，建议使用英文/数字/下划线；留空可由名称自动生成。',
+    'source-name-input': '新闻源名称：页面展示名称，用于下拉框与统计展示。',
+    'source-adapter-select': '抓取适配器：选择通用抓取方式（json_api/html_selector/rss）。',
+    'source-keyword-input': '检索关键词：用于搜索或查询参数中的关键词，占位参数通常用于 q/keyword。',
+    'source-sort-order-input': '排序优先级：值越小越靠前，影响新闻源下拉展示顺序。',
+    'source-description-input': '描述：记录该新闻源用途与说明，便于后续维护。',
+    'source-adapter-config-input': '适配器配置(JSON)：定义URL、选择器、字段映射、分页参数等抓取规则。',
+    'source-analyze-url': '自动分析URL：输入新闻列表页地址，后端会尝试自动识别列表结构并生成抓取配置。',
+    'source-analyze-btn': '自动分析并填充：调用后端结构分析接口，将推荐配置自动填入新闻源表单。',
     'predict-news-age-hours': '新闻时效（小时）：单股预测仅使用最近 N 小时新闻，降低陈旧信息干扰。',
     'feature-stock-code': '新闻特征股票代码：按股票维度查询新闻日级聚合特征。',
     'feature-trade-date': '交易日（可选）：为空则查询最新交易日特征，填写则查询指定日期。',
-    'joint-stocks': '股票数量（构建+训练共用）：参与一体化数据构建与训练的股票上限。',
+    'joint-stocks': '股票数量（构建+训练共用）：参与模型训练流程的数据构建与训练股票上限。',
     'joint-days': '历史天数（构建+训练共用）：构建样本与训练模型共同使用的历史窗口。',
     'joint-epochs': '训练轮数：多模态模型训练总轮次（epoch），轮数越高训练时间越长。',
     'joint-horizon': '预测窗口：用于标签构建的未来观察天数（如 5 表示未来 5 个交易日）。',
@@ -534,7 +543,11 @@ function attachParamHelp(target) {
 
     target.dataset.paramHelpBound = '1';
     target.dataset.paramHelp = detail;
-    target.setAttribute('title', detail);
+    if (target.hasAttribute('title')) {
+        target.dataset.paramHelpNativeTitle = target.getAttribute('title') || '';
+        target.removeAttribute('title');
+    }
+    target.setAttribute('aria-label', detail);
     target.classList.add('param-help-target');
     target.addEventListener('mouseenter', () => showParamHelpTooltip(target));
     target.addEventListener('mouseleave', hideParamHelpTooltip);

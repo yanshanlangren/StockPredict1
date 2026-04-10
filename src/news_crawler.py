@@ -14,13 +14,15 @@ import json
 import logging
 import hashlib
 import math
-from typing import Optional, List, Dict, Tuple, Set
+from typing import Any, Optional, List, Dict, Tuple, Set
 from datetime import datetime, timedelta
-from urllib.parse import urlparse, quote
+from urllib.parse import urlparse, quote, urljoin
 import re
 
 import pandas as pd
 import numpy as np
+
+from src.news_source_registry import get_news_source_registry
 
 logger = logging.getLogger(__name__)
 
@@ -43,23 +45,14 @@ try:
 except ImportError:
     std_requests = None
 
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    BeautifulSoup = None
+
 
 class NewsCrawler:
     """财经新闻爬取引擎"""
-
-    SOURCE_SYMBOL_MAP = {
-        "eastmoney": "财经新闻",
-        "sina": "新浪财经",
-        "tencent": "腾讯财经",
-    }
-
-    SOURCE_LABEL_MAP = {
-        "eastmoney": "东方财富",
-        "sina": "新浪财经",
-        "tencent": "腾讯财经",
-        "all": "全部来源",
-        "unknown": "未知",
-    }
 
     def __init__(self, cache_dir: str = "data/cache/news"):
         """
@@ -218,6 +211,42 @@ class NewsCrawler:
                 pass
         return filtered
 
+    def _list_enabled_source_configs(self) -> List[Dict]:
+        registry = get_news_source_registry()
+        source_items = registry.list_enabled_sources()
+        if source_items:
+            return source_items
+
+        fallback_id = registry.get_default_source_id()
+        fallback = registry.get_source(fallback_id)
+        if fallback:
+            return [fallback]
+
+        return [
+            {
+                "source_id": "eastmoney",
+                "name": "东方财富",
+                "adapter": "json_api",
+                "keyword": "财经新闻",
+                "enabled": True,
+                "adapter_config": {"preset": "eastmoney_search"},
+            }
+        ]
+
+    def _resolve_fetch_source_configs(self, source: str) -> List[Dict]:
+        normalized_source = self._normalize_source(source)
+        enabled_sources = self._list_enabled_source_configs()
+        source_map = {
+            str(item.get("source_id", "")).strip(): item
+            for item in enabled_sources
+            if str(item.get("source_id", "")).strip()
+        }
+        if normalized_source == "all":
+            return enabled_sources
+        if normalized_source in source_map:
+            return [source_map[normalized_source]]
+        return enabled_sources[:1]
+
     def get_news(
         self,
         stock_code: Optional[str] = None,
@@ -233,7 +262,7 @@ class NewsCrawler:
             stock_code: 股票代码（可选，用于筛选相关新闻）
             limit: 返回数量限制
             use_cache: 是否使用缓存
-            source: 新闻源 ('eastmoney', 'sina', 'tencent', 'all')
+            source: 新闻源 source_id 或 "all"
             max_news_age_hours: 新闻时效窗口（小时），None/<=0 表示不过滤
 
         Returns:
@@ -249,6 +278,12 @@ class NewsCrawler:
             limit_value = 50
 
         normalized_source = self._normalize_source(source)
+        source_configs = self._resolve_fetch_source_configs(normalized_source)
+        source_keys = [str(item.get("source_id", "")).strip() for item in source_configs]
+        source_keys = [item for item in source_keys if item]
+        cache_source_key = normalized_source if normalized_source == "all" else (
+            source_keys[0] if source_keys else normalized_source
+        )
         normalized_stock_code = self._normalize_stock_code(stock_code)
         max_age_hours = self._normalize_max_age_hours(max_news_age_hours)
 
@@ -262,7 +297,7 @@ class NewsCrawler:
         if use_cache:
             cached = self._load_from_cache(
                 stock_code=normalized_stock_code,
-                source=normalized_source,
+                source=cache_source_key,
                 max_age_hours=max_age_hours,
             )
             if cached:
@@ -271,7 +306,7 @@ class NewsCrawler:
                         "从缓存加载 %s 条新闻 (stock=%s, source=%s)",
                         len(cached),
                         normalized_stock_code or "all",
-                        normalized_source,
+                        cache_source_key,
                     )
                     return cached[:limit_value]
                 logger.info(
@@ -279,40 +314,34 @@ class NewsCrawler:
                     len(cached),
                     limit_value,
                     normalized_stock_code or "all",
-                    normalized_source,
+                    cache_source_key,
                 )
 
         try:
             fetched_news: List[Dict] = []
-            source_keys = (
-                ["eastmoney", "sina", "tencent"]
-                if normalized_source == "all"
-                else [normalized_source]
-            )
-
-            for source_key in source_keys:
-                symbol = self.SOURCE_SYMBOL_MAP.get(source_key)
-                if not symbol:
+            for source_cfg in source_configs:
+                source_key = str(source_cfg.get("source_id", "")).strip()
+                if not source_key:
                     continue
+                source_label = str(source_cfg.get("name") or source_key).strip() or source_key
+                adapter_key = str(source_cfg.get("adapter") or source_key).strip().lower() or "eastmoney"
+                keyword = str(source_cfg.get("keyword") or source_label).strip() or source_label
 
                 try:
                     if normalized_source == "all":
                         target_count = min(max(limit_value, 120), 800)
                     else:
                         target_count = min(max(limit_value, 60), 2000)
-                    rows = self._fetch_source_rows(
-                        source_key=source_key,
-                        keyword=symbol,
-                        max_items=target_count,
-                    )
+                    rows = self._fetch_source_rows(source_cfg=source_cfg, max_items=target_count)
                     for row in rows:
                         news_item = self._parse_news_row(row)
                         if not news_item:
                             continue
-                        news_item["source"] = self.SOURCE_LABEL_MAP.get(source_key, "未知")
+                        news_item["source"] = source_key
+                        news_item["source_name"] = source_label
                         fetched_news.append(news_item)
                 except Exception as exc:
-                    logger.warning("获取 %s 新闻失败: %s", source_key, exc)
+                    logger.warning("获取 %s(%s) 新闻失败: %s", source_key, adapter_key, exc)
 
             if normalized_stock_code and fetched_news:
                 before_filter = len(fetched_news)
@@ -333,7 +362,7 @@ class NewsCrawler:
                 self._save_to_cache(
                     news_list=sorted_news,
                     stock_code=normalized_stock_code,
-                    source=normalized_source,
+                    source=cache_source_key,
                 )
 
             filtered_news, age_filtered = self._apply_freshness_filter(sorted_news, max_age_hours)
@@ -343,7 +372,7 @@ class NewsCrawler:
                 "成功获取 %s 条新闻 (stock=%s, source=%s, dedup_removed=%s, age_filtered=%s, bad_ts=%s)",
                 len(filtered_news),
                 normalized_stock_code or "all",
-                normalized_source,
+                cache_source_key,
                 dedup_removed,
                 age_filtered,
                 self._last_fetch_meta["bad_timestamp_count"],
@@ -354,26 +383,480 @@ class NewsCrawler:
             logger.error("获取新闻失败: %s", exc)
             return []
 
-    def _fetch_source_rows(self, source_key: str, keyword: str, max_items: int) -> List[Dict]:
+    def _fetch_source_rows(self, source_cfg: Dict, max_items: int) -> List[Dict]:
         target_count = max(int(max_items), 1)
-        collected: List[Dict] = []
+        source_key = str(source_cfg.get("source_id", "")).strip()
+        source_name = str(source_cfg.get("name", source_key) or source_key).strip() or source_key
+        keyword = str(source_cfg.get("keyword", source_name) or source_name).strip() or source_name
+        adapter = str(source_cfg.get("adapter", "json_api") or "json_api").strip().lower()
+        adapter_config = source_cfg.get("adapter_config", {})
+        if not isinstance(adapter_config, dict):
+            adapter_config = {}
 
-        if source_key == "tencent":
-            collected.extend(self._fetch_tencent_hot_rows(max_items=target_count))
+        rows: List[Dict] = []
+        if adapter == "json_api":
+            rows = self._fetch_json_api_rows(
+                source_key=source_key,
+                source_name=source_name,
+                keyword=keyword,
+                max_items=target_count,
+                adapter_config=adapter_config,
+            )
+        elif adapter == "html_selector":
+            rows = self._fetch_html_selector_rows(
+                source_name=source_name,
+                keyword=keyword,
+                max_items=target_count,
+                adapter_config=adapter_config,
+            )
+        elif adapter == "rss":
+            rows = self._fetch_rss_rows(
+                source_name=source_name,
+                keyword=keyword,
+                max_items=target_count,
+                adapter_config=adapter_config,
+            )
+        else:
+            logger.warning("未知新闻源 adapter: source=%s adapter=%s", source_key, adapter)
+            return []
 
-        if len(collected) < target_count:
-            search_rows = self._fetch_eastmoney_search_rows(
+        deduped, _ = self._deduplicate_news_records(rows)
+        return deduped[:target_count]
+
+    def _config_int(self, payload: Dict, key: str, default: int, min_value: int, max_value: int) -> int:
+        try:
+            value = int(float(payload.get(key, default)))
+        except Exception:
+            value = int(default)
+        if value < min_value:
+            return min_value
+        if value > max_value:
+            return max_value
+        return value
+
+    def _fetch_json_api_rows(
+        self,
+        source_key: str,
+        source_name: str,
+        keyword: str,
+        max_items: int,
+        adapter_config: Dict,
+    ) -> List[Dict]:
+        target_count = max(int(max_items), 1)
+        preset = str(adapter_config.get("preset", "") or "").strip().lower()
+
+        if preset == "tencent_hot":
+            rows = self._fetch_tencent_hot_rows(max_items=target_count)
+            fallback_search = bool(adapter_config.get("fallback_search", True))
+            if fallback_search and len(rows) < target_count:
+                rows.extend(
+                    self._fetch_eastmoney_search_rows(
+                        keyword=keyword,
+                        max_items=max(target_count - len(rows), 100),
+                    )
+                )
+            return rows[:target_count]
+
+        if preset == "eastmoney_search":
+            rows = self._fetch_eastmoney_search_rows(
                 keyword=keyword,
                 max_items=max(target_count, 100),
             )
-            if search_rows:
-                collected.extend(search_rows)
+            if rows:
+                return rows[:target_count]
+            return self._fallback_akshare_rows(source_key=source_key, keyword=keyword, max_items=target_count)
 
-        deduped, _ = self._deduplicate_news_records(collected)
-        if deduped:
-            return deduped[:target_count]
+        url = str(adapter_config.get("url", "") or "").strip()
+        if not url:
+            return []
 
-        # 回退到 akshare 原接口（历史上固定 pageSize=10）
+        base_params = adapter_config.get("params", {})
+        if not isinstance(base_params, dict):
+            base_params = {}
+        headers = adapter_config.get("headers", {})
+        if not isinstance(headers, dict):
+            headers = {}
+        field_map = adapter_config.get("field_map", {})
+        if not isinstance(field_map, dict):
+            field_map = {}
+
+        list_path = str(adapter_config.get("list_path", "") or "").strip()
+        query_param = str(adapter_config.get("query_param", "") or "").strip()
+        page_param = str(adapter_config.get("page_param", "") or "").strip()
+        page_start = self._config_int(adapter_config, "page_start", 1, 0, 1000000)
+        page_size_param = str(adapter_config.get("page_size_param", "") or "").strip()
+        page_size = self._config_int(adapter_config, "page_size", 50, 1, 1000)
+        limit_param = str(adapter_config.get("limit_param", "") or "").strip()
+        max_pages = self._config_int(adapter_config, "max_pages", 1, 1, 30)
+        timeout = self._config_int(adapter_config, "timeout", 20, 3, 120)
+        response_format = str(adapter_config.get("response_format", "") or "").strip().lower()
+        is_jsonp = bool(adapter_config.get("jsonp", False)) or response_format == "jsonp"
+
+        rows: List[Dict] = []
+        for page_index in range(max_pages):
+            params = dict(base_params)
+            if query_param and keyword:
+                params[query_param] = keyword
+            if page_param:
+                params[page_param] = page_start + page_index
+            if page_size_param:
+                params[page_size_param] = page_size
+            if limit_param and limit_param not in params:
+                params[limit_param] = min(target_count, page_size)
+
+            if is_jsonp:
+                text = self._http_get_text(url=url, params=params, headers=headers, timeout=timeout)
+                payload = self._parse_jsonp_payload(text)
+            else:
+                payload = self._http_get_json(url=url, params=params, headers=headers, timeout=timeout)
+
+            items = self._extract_payload_items(payload, list_path)
+            if not items:
+                if page_index == 0:
+                    continue
+                break
+
+            for item in items:
+                row = self._build_row_from_json_item(
+                    item=item,
+                    source_name=source_name,
+                    keyword=keyword,
+                    field_map=field_map,
+                )
+                if row:
+                    rows.append(row)
+                if len(rows) >= target_count:
+                    return rows[:target_count]
+
+            if len(items) < page_size:
+                break
+
+        if rows:
+            return rows[:target_count]
+
+        if bool(adapter_config.get("akshare_fallback", False)):
+            return self._fallback_akshare_rows(source_key=source_key, keyword=keyword, max_items=target_count)
+        return []
+
+    def _fetch_html_selector_rows(
+        self,
+        source_name: str,
+        keyword: str,
+        max_items: int,
+        adapter_config: Dict,
+    ) -> List[Dict]:
+        if BeautifulSoup is None:
+            logger.warning("BeautifulSoup 不可用，html_selector adapter 无法执行")
+            return []
+
+        url = str(adapter_config.get("url", "") or "").strip()
+        if not url:
+            return []
+
+        headers = adapter_config.get("headers", {})
+        if not isinstance(headers, dict):
+            headers = {}
+        base_params = adapter_config.get("params", {})
+        if not isinstance(base_params, dict):
+            base_params = {}
+        field_map = adapter_config.get("field_map", {})
+        if not isinstance(field_map, dict):
+            field_map = {}
+
+        item_selector = str(adapter_config.get("item_selector", "") or "").strip() or "article"
+        query_param = str(adapter_config.get("query_param", "") or "").strip()
+        page_param = str(adapter_config.get("page_param", "") or "").strip()
+        page_start = self._config_int(adapter_config, "page_start", 1, 0, 1000000)
+        max_pages = self._config_int(adapter_config, "max_pages", 1, 1, 20)
+        timeout = self._config_int(adapter_config, "timeout", 20, 3, 120)
+        link_base = str(adapter_config.get("link_base", "") or "").strip() or url
+
+        rows: List[Dict] = []
+        for page_index in range(max_pages):
+            params = dict(base_params)
+            if query_param and keyword:
+                params[query_param] = keyword
+            if page_param:
+                params[page_param] = page_start + page_index
+
+            html_text = self._http_get_text(url=url, params=params, headers=headers, timeout=timeout)
+            if not html_text:
+                if page_index == 0:
+                    continue
+                break
+
+            try:
+                soup = BeautifulSoup(html_text, "lxml")
+            except Exception:
+                soup = BeautifulSoup(html_text, "html.parser")
+            nodes = soup.select(item_selector) if item_selector else []
+            if not nodes:
+                break
+
+            for node in nodes:
+                row = self._build_row_from_html_item(
+                    node=node,
+                    source_name=source_name,
+                    keyword=keyword,
+                    field_map=field_map,
+                    link_base=link_base,
+                )
+                if row:
+                    rows.append(row)
+                if len(rows) >= max_items:
+                    return rows[:max_items]
+        return rows[:max_items]
+
+    def _fetch_rss_rows(
+        self,
+        source_name: str,
+        keyword: str,
+        max_items: int,
+        adapter_config: Dict,
+    ) -> List[Dict]:
+        if BeautifulSoup is None:
+            logger.warning("BeautifulSoup 不可用，rss adapter 无法执行")
+            return []
+
+        raw_url = str(adapter_config.get("url", "") or adapter_config.get("feed_url", "")).strip()
+        if not raw_url:
+            return []
+        feed_url = raw_url.replace("{keyword}", quote(keyword))
+
+        headers = adapter_config.get("headers", {})
+        if not isinstance(headers, dict):
+            headers = {}
+        timeout = self._config_int(adapter_config, "timeout", 20, 3, 120)
+        item_tag = str(adapter_config.get("item_tag", "") or "").strip()
+
+        xml_text = self._http_get_text(url=feed_url, params={}, headers=headers, timeout=timeout)
+        if not xml_text:
+            return []
+
+        try:
+            soup = BeautifulSoup(xml_text, "xml")
+        except Exception:
+            soup = BeautifulSoup(xml_text, "html.parser")
+        items = soup.find_all(item_tag) if item_tag else soup.find_all(["item", "entry"])
+        rows: List[Dict] = []
+
+        for item in items:
+            title = self._find_xml_field_text(item, ["title"])
+            content = self._find_xml_field_text(item, ["description", "content", "summary", "content:encoded"])
+            publish_time = self._find_xml_field_text(item, ["pubDate", "published", "updated", "dc:date"])
+            source = self._find_xml_field_text(item, ["source", "author"]) or source_name
+
+            link = ""
+            link_node = item.find("link")
+            if link_node is not None:
+                href = str(link_node.get("href", "") or "").strip()
+                text_link = link_node.get_text(strip=True)
+                link = href or text_link
+            if not link:
+                link = self._find_xml_field_text(item, ["guid", "id"])
+            if link and not str(link).startswith(("http://", "https://")):
+                link = urljoin(feed_url, str(link))
+
+            if not title:
+                continue
+            if not publish_time:
+                publish_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            rows.append(
+                {
+                    "关键词": keyword,
+                    "新闻标题": title,
+                    "新闻内容": content,
+                    "发布时间": publish_time,
+                    "来源": source,
+                    "新闻链接": link,
+                }
+            )
+            if len(rows) >= max_items:
+                break
+
+        return rows[:max_items]
+
+    def _extract_payload_items(self, payload: Any, list_path: str) -> List[Any]:
+        if payload is None:
+            return []
+        if list_path:
+            value = self._extract_path_value(payload, list_path)
+            if isinstance(value, list):
+                return value
+            if isinstance(value, dict):
+                return [value]
+            return []
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict):
+            for key in ("items", "list", "data", "result", "rows"):
+                candidate = payload.get(key)
+                if isinstance(candidate, list):
+                    return candidate
+            return []
+        return []
+
+    def _extract_path_value(self, payload: Any, path: str) -> Any:
+        text = str(path or "").strip()
+        if not text:
+            return payload
+        tokens = re.findall(r"[^.\[\]]+", text)
+        current = payload
+        for token in tokens:
+            if isinstance(current, dict):
+                if token in current:
+                    current = current[token]
+                    continue
+                return None
+            if isinstance(current, list):
+                try:
+                    index = int(token)
+                except Exception:
+                    return None
+                if index < 0 or index >= len(current):
+                    return None
+                current = current[index]
+                continue
+            return None
+        return current
+
+    def _extract_json_field(self, item: Any, rule: Any, fallback_paths: List[str]) -> str:
+        candidates: List[Any] = []
+        default_value = ""
+        if isinstance(rule, str):
+            candidates.append(rule)
+        elif isinstance(rule, list):
+            candidates.extend(rule)
+        elif isinstance(rule, dict):
+            if "value" in rule:
+                return str(rule.get("value", "") or "").strip()
+            path = rule.get("path", rule.get("field", ""))
+            if path:
+                candidates.append(path)
+            paths = rule.get("paths", [])
+            if isinstance(paths, list):
+                candidates.extend(paths)
+            default_value = str(rule.get("default", "") or "")
+
+        if not candidates:
+            candidates.extend(fallback_paths)
+
+        for candidate in candidates:
+            value = self._extract_path_value(item, str(candidate or ""))
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return default_value
+
+    def _build_row_from_json_item(
+        self,
+        item: Any,
+        source_name: str,
+        keyword: str,
+        field_map: Dict[str, Any],
+    ) -> Optional[Dict]:
+        if not isinstance(item, dict):
+            return None
+
+        title = self._extract_json_field(item, field_map.get("title"), ["title", "新闻标题"])
+        if not title:
+            return None
+        content = self._extract_json_field(item, field_map.get("content"), ["content", "summary", "新闻内容"])
+        publish_time = self._extract_json_field(
+            item,
+            field_map.get("publish_time"),
+            ["publish_time", "pub_time", "date", "time", "发布时间"],
+        )
+        url = self._extract_json_field(item, field_map.get("url"), ["url", "link", "news_url", "新闻链接"])
+        source = self._extract_json_field(item, field_map.get("source"), ["source", "mediaName", "来源"]) or source_name
+
+        if not publish_time:
+            publish_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        return {
+            "关键词": keyword,
+            "新闻标题": title,
+            "新闻内容": content,
+            "发布时间": publish_time,
+            "来源": source,
+            "新闻链接": url,
+        }
+
+    def _extract_html_field(self, node: Any, rule: Any) -> str:
+        if rule is None:
+            return ""
+        if isinstance(rule, str):
+            selector = rule
+            attr = "text"
+            default_value = ""
+        elif isinstance(rule, dict):
+            if "value" in rule:
+                return str(rule.get("value", "") or "").strip()
+            selector = str(rule.get("selector", "") or "").strip()
+            attr = str(rule.get("attr", "text") or "text").strip().lower()
+            default_value = str(rule.get("default", "") or "")
+        else:
+            return ""
+
+        target = node
+        if selector:
+            target = node.select_one(selector)
+        if target is None:
+            return default_value
+
+        if attr in {"text", "innertext", "content"}:
+            return target.get_text(" ", strip=True)
+        if attr == "html":
+            return str(target)
+        return str(target.get(attr, default_value) or "").strip()
+
+    def _build_row_from_html_item(
+        self,
+        node: Any,
+        source_name: str,
+        keyword: str,
+        field_map: Dict[str, Any],
+        link_base: str,
+    ) -> Optional[Dict]:
+        title = self._extract_html_field(node, field_map.get("title", {"selector": "a", "attr": "text"}))
+        if not title:
+            return None
+        content = self._extract_html_field(node, field_map.get("content", {"selector": "p", "attr": "text"}))
+        publish_time = self._extract_html_field(
+            node,
+            field_map.get("publish_time", {"selector": "time", "attr": "text"}),
+        )
+        if not publish_time:
+            publish_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        source = self._extract_html_field(node, field_map.get("source", {"value": source_name})) or source_name
+        url = self._extract_html_field(node, field_map.get("url", {"selector": "a", "attr": "href"}))
+        if url and not url.startswith(("http://", "https://")):
+            url = urljoin(link_base, url)
+
+        return {
+            "关键词": keyword,
+            "新闻标题": title,
+            "新闻内容": content,
+            "发布时间": publish_time,
+            "来源": source,
+            "新闻链接": url,
+        }
+
+    def _find_xml_field_text(self, node: Any, names: List[str]) -> str:
+        for name in names:
+            found = node.find(name)
+            if found is None:
+                continue
+            text = found.get_text(" ", strip=True)
+            if text:
+                return text
+        return ""
+
+    def _fallback_akshare_rows(self, source_key: str, keyword: str, max_items: int) -> List[Dict]:
         fallback_rows: List[Dict] = []
         try:
             df = ak.stock_news_em(symbol=keyword)
@@ -382,10 +865,10 @@ class NewsCrawler:
                     fallback_rows.append(dict(row))
         except Exception as exc:
             logger.warning("source=%s 回退接口抓取失败: %s", source_key, exc)
-        if fallback_rows:
-            deduped_fallback, _ = self._deduplicate_news_records(fallback_rows)
-            return deduped_fallback[:target_count]
-        return []
+        if not fallback_rows:
+            return []
+        deduped_fallback, _ = self._deduplicate_news_records(fallback_rows)
+        return deduped_fallback[: max(int(max_items), 1)]
 
     def _fetch_tencent_hot_rows(self, max_items: int = 100) -> List[Dict]:
         target_count = max(1, min(int(max_items), 200))
@@ -555,10 +1038,19 @@ class NewsCrawler:
         except Exception:
             return {}
 
-    def _http_get_text(self, url: str, params: Dict, headers: Dict, timeout: int = 20) -> str:
+    def _http_get_text(
+        self,
+        url: str,
+        params: Optional[Dict] = None,
+        headers: Optional[Dict] = None,
+        timeout: int = 20,
+    ) -> str:
+        query_params = params if isinstance(params, dict) else {}
+        request_headers = headers if isinstance(headers, dict) else {}
+
         if curl_requests is not None:
             try:
-                resp = curl_requests.get(url, params=params, headers=headers, timeout=timeout)
+                resp = curl_requests.get(url, params=query_params, headers=request_headers, timeout=timeout)
                 if getattr(resp, "status_code", 0) == 200:
                     return str(resp.text or "")
             except Exception:
@@ -566,7 +1058,7 @@ class NewsCrawler:
 
         if std_requests is not None:
             try:
-                resp = std_requests.get(url, params=params, headers=headers, timeout=timeout)
+                resp = std_requests.get(url, params=query_params, headers=request_headers, timeout=timeout)
                 if resp.status_code == 200:
                     return str(resp.text or "")
             except Exception:
@@ -574,7 +1066,13 @@ class NewsCrawler:
 
         return ""
 
-    def _http_get_json(self, url: str, params: Dict, headers: Dict, timeout: int = 20) -> Dict:
+    def _http_get_json(
+        self,
+        url: str,
+        params: Optional[Dict] = None,
+        headers: Optional[Dict] = None,
+        timeout: int = 20,
+    ) -> Dict:
         text = self._http_get_text(url=url, params=params, headers=headers, timeout=timeout)
         if not text:
             return {}
@@ -1108,16 +1606,8 @@ class NewsCrawler:
         return parsed if parsed is not None else datetime(1970, 1, 1)
 
     def _normalize_source(self, source: str) -> str:
-        normalized = str(source or "").strip().lower()
-        if normalized in {"eastmoney", "sina", "tencent", "all"}:
-            return normalized
-        if normalized in {"东方财富", "财经新闻"}:
-            return "eastmoney"
-        if normalized in {"新浪", "新浪财经"}:
-            return "sina"
-        if normalized in {"腾讯", "腾讯财经"}:
-            return "tencent"
-        return "eastmoney"
+        registry = get_news_source_registry()
+        return registry.resolve_source_id(source)
 
     def _normalize_stock_code(self, stock_code: Optional[str]) -> Optional[str]:
         if stock_code is None:
@@ -1186,9 +1676,12 @@ class NewsCrawler:
                 sectors[sector] = sectors.get(sector, 0) + 1
 
         sources = {}
+        source_name_map = {}
         for news in news_list:
-            source = str(news.get("source", "未知") or "未知")
-            sources[source] = sources.get(source, 0) + 1
+            source_id = str(news.get("source", "unknown") or "unknown").strip() or "unknown"
+            source_name = str(news.get("source_name", source_id) or source_id).strip() or source_id
+            sources[source_id] = sources.get(source_id, 0) + 1
+            source_name_map[source_id] = source_name
 
         return {
             "total": len(news_list),
@@ -1201,6 +1694,7 @@ class NewsCrawler:
             "avg_importance": round(np.mean([float(n.get("importance", 0) or 0) for n in news_list]), 2),
             "sector_distribution": dict(sorted(sectors.items(), key=lambda item: item[1], reverse=True)[:10]),
             "source_distribution": dict(sorted(sources.items(), key=lambda item: item[1], reverse=True)),
+            "source_name_map": source_name_map,
             "quality_meta": dict(self._last_fetch_meta),
         }
 

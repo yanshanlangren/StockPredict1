@@ -10,6 +10,7 @@ from datetime import datetime
 from flask import jsonify
 
 import src.web_runtime as runtime
+from src.news_source_registry import get_news_source_registry
 from src.services.news_common import parse_optional_age_hours
 
 
@@ -21,14 +22,20 @@ def get_news_sync_status_api():
 
 
 def _normalize_sources(requested_sources):
-    default_sources = ["eastmoney", "sina", "tencent"]
+    registry = get_news_source_registry()
+    default_sources = registry.list_enabled_source_ids()
+
     if isinstance(requested_sources, list) and requested_sources:
-        allowed = {"eastmoney", "sina", "tencent"}
-        sources = [
-            str(item).strip().lower()
-            for item in requested_sources
-            if str(item).strip().lower() in allowed
-        ]
+        sources = []
+        for item in requested_sources:
+            source_id = registry.resolve_source_id(item)
+            if source_id == "all":
+                continue
+            source_meta = registry.get_source(source_id)
+            if not source_meta or (not bool(source_meta.get("enabled", True))):
+                continue
+            if source_id not in sources:
+                sources.append(source_id)
         if sources:
             return sources
     return default_sources
@@ -77,6 +84,8 @@ def start_news_sync_api(params: dict):
             runtime.news_sync_status["message"] = message
             runtime.news_sync_status["detail"] = detail or None
 
+    registry = get_news_source_registry()
+
     def run_news_sync():
         try:
             from src.news_crawler import get_news_crawler
@@ -85,23 +94,30 @@ def start_news_sync_api(params: dict):
             if not crawler.is_available():
                 raise RuntimeError("新闻爬虫不可用，请先安装或启用 akshare")
 
+            source_meta_map = {source_id: (registry.get_source(source_id) or {}) for source_id in sources}
+            source_labels = {
+                source_id: str(meta.get("name") or source_id)
+                for source_id, meta in source_meta_map.items()
+            }
             source_counts = {}
             all_news_items = []
             total_sources = len(sources)
 
             for idx, source in enumerate(sources, 1):
+                source_label = source_labels.get(source, source)
                 begin_progress = 5 + int((idx - 1) / max(total_sources, 1) * 80)
                 update_news_status(
                     begin_progress,
-                    f"正在同步 {source} 新闻源...",
+                    f"正在同步 {source_label} 新闻源...",
                     {
-                        "current_source": source,
+                        "current_source": source_label,
+                        "current_source_id": source,
                         "source_index": idx,
                         "source_total": total_sources,
                         "source_counts": source_counts,
+                        "source_labels": source_labels,
                     },
                 )
-
                 try:
                     fetched = crawler.get_news(
                         stock_code=None,
@@ -120,12 +136,14 @@ def start_news_sync_api(params: dict):
                 end_progress = 5 + int(idx / max(total_sources, 1) * 80)
                 update_news_status(
                     end_progress,
-                    f"已完成 {source} 新闻源，同步 {len(fetched)} 条",
+                    f"已完成 {source_label} 新闻源，同步 {len(fetched)} 条",
                     {
-                        "current_source": source,
+                        "current_source": source_label,
+                        "current_source_id": source,
                         "source_index": idx,
                         "source_total": total_sources,
                         "source_counts": source_counts,
+                        "source_labels": source_labels,
                     },
                 )
 
@@ -134,6 +152,7 @@ def start_news_sync_api(params: dict):
             statistics = crawler.get_news_statistics(deduped)
             result = {
                 "sources": sources,
+                "source_labels": source_labels,
                 "source_counts": source_counts,
                 "total_raw": len(all_news_items),
                 "total_unique": len(deduped),
@@ -154,6 +173,7 @@ def start_news_sync_api(params: dict):
                     "source_index": total_sources,
                     "source_total": total_sources,
                     "source_counts": source_counts,
+                    "source_labels": source_labels,
                     "total_unique": len(deduped),
                     "max_news_age_hours": max_news_age_hours,
                 }

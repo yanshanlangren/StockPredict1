@@ -59,7 +59,7 @@
 </div>
 
 <div class="card">
-    <h2>🚀 一体化模型训练（离线数据集 + 多模态模型）</h2>
+    <h2>🚀 模型训练（离线数据集 + 多模态模型）</h2>
     <div class="dataset-note" style="margin-bottom: 12px;">
         将“构建离线数据集”和“多模态模型训练”合并为一个流程，统一使用相同的股票数量与历史天数参数。
         启动后会先构建 <code>model_dataset</code> / <code>market_daily</code> / <code>news_raw</code>，
@@ -122,7 +122,7 @@
 
     <div class="dataset-action-row">
         <button id="mm-train-btn" class="btn btn-success" onclick="startMultimodalTrain()">
-            开始一体化训练
+            开始模型训练
         </button>
         <button id="mm-refresh-btn" class="btn btn-primary" onclick="refreshMultimodalPrecheck()">
             刷新状态
@@ -132,7 +132,7 @@
     <div id="mm-train-panel" class="dataset-build-panel baseline-build-panel" style="display: none; margin-top: 12px;">
         <div class="dataset-build-header">
             <div>
-                <div class="dataset-build-title">一体化训练进度</div>
+                <div class="dataset-build-title">模型训练进度</div>
                 <div class="dataset-build-message" id="mm-build-message">准备中...</div>
             </div>
             <div class="dataset-build-percent baseline-build-percent" id="mm-build-percent">0%</div>
@@ -144,7 +144,7 @@
     </div>
 
     <div id="mm-train-complete" style="display: none; margin-top: 12px; padding: 12px; border-radius: 8px; background: #dcfce7; color: #166534;">
-        一体化训练完成，离线数据集与多模态模型均已更新。
+        模型训练完成，离线数据集与多模态模型均已更新。
     </div>
     <div id="mm-train-error" style="display: none; margin-top: 12px; padding: 12px; border-radius: 8px; background: #fee2e2; color: #991b1b;"></div>
 </div>
@@ -675,6 +675,11 @@ const METRIC_ORDER = [
     'topk_avg_future_return'
 ];
 
+const QUALITY_PANES = ['baseline', 'evaluation', 'backtest', 'sample', 'artifacts'];
+const QUALITY_TAB_STORAGE_KEY = 'dataset_quality_active_tab_v1';
+const QUALITY_OPEN_STORAGE_KEY = 'dataset_quality_open_v1';
+const QUALITY_HASH_PREFIX = '#quality-';
+
 document.addEventListener('DOMContentLoaded', async function() {
     updateQualityAssessmentButton(false);
     await loadDatasetInfo();
@@ -685,12 +690,93 @@ document.addEventListener('DOMContentLoaded', async function() {
     await syncLatestReportButtons();
     await loadLatestEvaluationReport();
     await loadLatestBacktestReport();
+    restoreQualityAssessmentState();
     statusPollTimer = setInterval(async () => {
         await syncDatasetBuildStatus();
         await syncBaselineTrainStatus();
         await syncMultimodalTrainStatus();
     }, 3000);
 });
+
+window.addEventListener('hashchange', () => {
+    const pane = getQualityPaneFromHash();
+    if (!pane || !qualityAssessmentReady) {
+        return;
+    }
+    ensureQualityTabsVisible();
+    switchQualityPane(pane, { updateHash: false });
+});
+
+function isValidQualityPane(type) {
+    return QUALITY_PANES.includes(type);
+}
+
+function getQualityPaneFromHash() {
+    const hash = String(window.location.hash || '');
+    if (!hash.startsWith(QUALITY_HASH_PREFIX)) {
+        return null;
+    }
+    const pane = hash.slice(QUALITY_HASH_PREFIX.length);
+    return isValidQualityPane(pane) ? pane : null;
+}
+
+function getStoredQualityPane() {
+    try {
+        const pane = localStorage.getItem(QUALITY_TAB_STORAGE_KEY) || '';
+        return isValidQualityPane(pane) ? pane : null;
+    } catch (error) {
+        return null;
+    }
+}
+
+function getPreferredQualityPane() {
+    return getQualityPaneFromHash() || getStoredQualityPane() || 'baseline';
+}
+
+function setQualityAssessmentOpenState(isOpen) {
+    try {
+        localStorage.setItem(QUALITY_OPEN_STORAGE_KEY, isOpen ? '1' : '0');
+    } catch (error) {
+        // ignore storage errors
+    }
+}
+
+function isQualityAssessmentOpen() {
+    try {
+        return localStorage.getItem(QUALITY_OPEN_STORAGE_KEY) === '1';
+    } catch (error) {
+        return false;
+    }
+}
+
+function persistQualityPane(type) {
+    if (!isValidQualityPane(type)) {
+        return;
+    }
+    try {
+        localStorage.setItem(QUALITY_TAB_STORAGE_KEY, type);
+    } catch (error) {
+        // ignore storage errors
+    }
+}
+
+function ensureQualityTabsVisible() {
+    const tabs = document.getElementById('quality-tabs');
+    if (tabs) {
+        tabs.style.display = 'flex';
+    }
+}
+
+function restoreQualityAssessmentState() {
+    if (!qualityAssessmentReady) {
+        return;
+    }
+    if (!isQualityAssessmentOpen() && !getQualityPaneFromHash()) {
+        return;
+    }
+    ensureQualityTabsVisible();
+    switchQualityPane(getPreferredQualityPane(), { updateHash: false });
+}
 
 async function loadDatasetInfo() {
     try {
@@ -766,23 +852,26 @@ function updateQualityAssessmentButton(ready) {
                 pane.style.display = 'none';
             }
         });
+        return;
     }
+
+    restoreQualityAssessmentState();
 }
 
 function openQualityAssessment() {
     if (!qualityAssessmentReady) {
-        showToast('请先完成一体化训练，再打开数据集质量评估', 'info');
+        showToast('请先完成模型训练，再打开数据集质量评估', 'info');
         return;
     }
 
-    const tabs = document.getElementById('quality-tabs');
-    if (tabs) {
-        tabs.style.display = 'flex';
-    }
-    switchQualityPane('baseline');
+    setQualityAssessmentOpenState(true);
+    ensureQualityTabsVisible();
+    switchQualityPane(getPreferredQualityPane(), { updateHash: true });
 }
 
-function switchQualityPane(type) {
+function switchQualityPane(type, options = {}) {
+    const selectedType = isValidQualityPane(type) ? type : 'baseline';
+    const updateHash = options.updateHash !== false;
     const paneMap = {
         baseline: 'quality-pane-baseline',
         evaluation: 'quality-pane-evaluation',
@@ -801,7 +890,7 @@ function switchQualityPane(type) {
     Object.entries(paneMap).forEach(([key, paneId]) => {
         const paneEl = document.getElementById(paneId);
         if (paneEl) {
-            paneEl.style.display = key === type ? 'block' : 'none';
+            paneEl.style.display = key === selectedType ? 'block' : 'none';
         }
     });
 
@@ -811,8 +900,15 @@ function switchQualityPane(type) {
             return;
         }
         tabEl.classList.remove('btn-primary', 'btn-success');
-        tabEl.classList.add(key === type ? 'btn-success' : 'btn-primary');
+        tabEl.classList.add(key === selectedType ? 'btn-success' : 'btn-primary');
     });
+
+    persistQualityPane(selectedType);
+    setQualityAssessmentOpenState(true);
+    if (updateHash) {
+        const newUrl = `${window.location.pathname}${window.location.search}${QUALITY_HASH_PREFIX}${selectedType}`;
+        window.history.replaceState({}, '', newUrl);
+    }
 }
 
 function renderMultimodalPrecheck(precheck) {
@@ -874,7 +970,7 @@ function renderMultimodalPrecheck(precheck) {
     const featureReady = featureGroups.length > 0 && featureGroups.every(item => !!item.ready);
     const tfReady = !!(precheck && precheck.tensorflow_available);
     if (tfReady && inputReady) {
-        const suffix = featureReady ? '四类特征状态正常，可直接启动一体化训练。' : '可训练，但部分特征分组缺失，建议先补齐后再训。';
+        const suffix = featureReady ? '四类特征状态正常，可直接启动模型训练。' : '可训练，但部分特征分组缺失，建议先补齐后再训。';
         summaryEl.style.background = '#dcfce7';
         summaryEl.style.color = '#166534';
         summaryEl.textContent = `训练前置检查通过。${suffix}`;
@@ -882,9 +978,9 @@ function renderMultimodalPrecheck(precheck) {
         summaryEl.style.background = '#fee2e2';
         summaryEl.style.color = '#991b1b';
         if (!tfReady) {
-            summaryEl.textContent = '当前环境未启用 TensorFlow，无法进行一体化训练。';
+            summaryEl.textContent = '当前环境未启用 TensorFlow，无法进行模型训练。';
         } else {
-            summaryEl.textContent = '检测到训练输入尚未构建，启动一体化训练后会先自动构建 model_dataset / market_daily / news_raw。';
+            summaryEl.textContent = '检测到训练输入尚未构建，启动模型训练后会先自动构建 model_dataset / market_daily / news_raw。';
         }
     }
 
@@ -940,7 +1036,7 @@ function updateMultimodalTrainButtonState(isTraining) {
 
     if (isTraining) {
         button.disabled = true;
-        button.textContent = '一体化训练中...';
+        button.textContent = '模型训练中...';
         return;
     }
 
@@ -949,7 +1045,7 @@ function updateMultimodalTrainButtonState(isTraining) {
     const canStart = tfReady && !(jointPipelineContext && jointPipelineContext.running);
 
     button.disabled = !canStart;
-    button.textContent = '开始一体化训练';
+    button.textContent = '开始模型训练';
     button.title = canStart ? '先构建离线数据集，再训练 TensorFlow 多模态模型' : '请先启用 TensorFlow 后再训练';
 }
 
@@ -973,12 +1069,12 @@ async function startMultimodalTrain() {
 
     const precheck = multimodalPrecheckCache || {};
     if (!precheck.tensorflow_available) {
-        showToast('当前环境未启用 TensorFlow，无法启动一体化训练', 'error');
+        showToast('当前环境未启用 TensorFlow，无法启动模型训练', 'error');
         return;
     }
 
     if (jointPipelineContext && jointPipelineContext.running) {
-        showToast('一体化训练任务正在执行中，请稍候', 'info');
+        showToast('模型训练任务正在执行中，请稍候', 'info');
         return;
     }
 
@@ -1022,7 +1118,7 @@ async function startMultimodalTrain() {
         showToast('已启动离线数据构建，完成后将自动进入模型训练', 'info');
         await syncDatasetBuildStatus();
     } catch (error) {
-        console.error('启动一体化训练失败:', error);
+        console.error('启动模型训练失败:', error);
         await finishJointPipelineWithError(`启动失败: ${error.message}`);
     }
 }
@@ -1056,7 +1152,7 @@ async function triggerJointMultimodalTrain() {
 async function finishJointPipelineWithError(message) {
     const completeEl = document.getElementById('mm-train-complete');
     const errorEl = document.getElementById('mm-train-error');
-    const normalized = message || '一体化训练失败';
+    const normalized = message || '模型训练失败';
 
     if (errorEl) {
         errorEl.style.display = 'block';
